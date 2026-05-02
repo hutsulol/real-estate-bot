@@ -21,9 +21,21 @@ async function tg(method, params = {}) {
 }
 
 async function answer(text) {
-  const prompt = `Ты AI-агент по недвижимости в Ивано-Франковске. Объясняй, как оценивать выгоду квартиры: цена за м², район, ЖК, ликвидность. Коротко и по делу. Вопрос: ${text}`;
-  const r = await openai.chat.completions.create({ model: 'gpt-4o-mini', temperature: 0.2, messages: [{ role: 'user', content: prompt }] });
-  return r.choices?.[0]?.message?.content || 'Не удалось сгенерировать ответ.';
+  const system = `Ти AI-асистент з нерухомості. ВІДПОВІДАЙ ЛИШЕ УКРАЇНСЬКОЮ мовою, навіть якщо користувач пише іншою.
+Правила:
+- Без копіпасти і шаблонних довгих списків.
+- Коротко: 2-5 речень, по суті.
+- Якщо доречно, дай 1-3 конкретні критерії оцінки вигоди (ціна за м², район, ЖК, ліквідність).
+- Не повторюй попередню відповідь майже дослівно.`;
+  const r = await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    temperature: 0.3,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: text }
+    ]
+  });
+  return r.choices?.[0]?.message?.content || 'Вибач, не вдалося сформувати відповідь.';
 }
 
 (async () => {

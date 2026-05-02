@@ -2,7 +2,7 @@ require('dotenv').config();
 const OpenAI = require('openai');
 const { createClient } = require('@supabase/supabase-js');
 const { parseUserIntent, enrichWithHeuristic } = require('./value-agent');
-const { appendMemory, getRecentMemory, vaultRoot, handleLearningInstruction } = require('./obsidian-memory');
+const { appendMemory, getRecentMemory, vaultRoot, handleLearningInstruction, listBranches, getActiveBranchName } = require('./obsidian-memory');
 
 const TELEGRAM_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '')
   .trim()
@@ -104,6 +104,11 @@ async function findListingsByIntent(text) {
 
 const lastAssistantReplyByChat = new Map();
 
+function isBranchListQuery(text) {
+  return /(які\s+.*гілк|какие\s+.*ветк|list\s+branches|show\s+branches)/i.test(String(text || ''));
+}
+
+
 function shouldReturnListings(text) {
   const t = String(text || '').toLowerCase();
   const explicitListIntent = /(покажи|підбери|подбери|знайди|find|search|дай\s+\d+)/i.test(t)
@@ -122,6 +127,18 @@ async function answer(text, chatId = 'default') {
     const out = `${learningAck} Тепер використаю це у наступних відповідях.`;
     lastAssistantReplyByChat.set(String(chatId), out);
     return out;
+  }
+
+  if (isBranchListQuery(text)) {
+    const branches = listBranches();
+    const active = getActiveBranchName();
+    const reply = branches.length
+      ? `Гілки пам'яті:
+- ${branches.join('\n- ')}\n\nАктивна: ${active}`
+      : 'Гілок поки немає.';
+    appendMemory({ userText: text, replyText: reply, intent: null, listMode: 'memory_query' });
+    lastAssistantReplyByChat.set(String(chatId), reply);
+    return reply;
   }
 
   const askForListings = shouldReturnListings(text);

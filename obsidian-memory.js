@@ -52,6 +52,18 @@ function switchToBranch(branchTitle) {
   return filename;
 }
 
+
+function listBranches() {
+  ensureVault();
+  return fs.readdirSync(memoryDir)
+    .filter((f) => f.endsWith('.md'))
+    .sort();
+}
+
+function getActiveBranchName() {
+  return getActiveFileName();
+}
+
 function readMemoryFile() {
   ensureVault();
   return fs.readFileSync(getActiveFilePath(), 'utf8');
@@ -93,9 +105,10 @@ function detectLearningInstruction(userText = '') {
     return { type: 'new_branch', section: 'Strategic Learning' };
   }
 
-  const learnMatch = t.match(/(?:запам'?ятай|запомни|навчись|learn|будемо\s+навчатись|давай\s+навчатись|запиши\s+це|запиши\s+в)/i);
+  const forceKnowledgeLog = /(knowledge\s*log|knowledge\s*base|база\s*знань)/i.test(t) && /(додай|добав|запиши|впиши|add|write)/i.test(t);
+  const learnMatch = forceKnowledgeLog || t.match(/(?:запам'?ятай|запомни|навчись|learn|будемо\s+навчатись|давай\s+навчатись|запиши\s+це|запиши\s+в)/i);
   if (learnMatch) {
-    const writeThis = /^(?:так,?\s*)?(?:запиши\s+це)(?:\s+в.*)?$/i.test(t);
+    const writeThis = /^(?:так,?\s*)?(?:запиши\s+це)(?:\s+в.*)?$/i.test(t) || forceKnowledgeLog;
     const payload = writeThis
       ? (contextText || '').trim()
       : (t.replace(/^(?:запам'?ятай|запомни|навчись|learn|будемо\s+навчатись|давай\s+навчатись|запиши\s+це|запиши\s+в)\s*[:\-]?\s*/i, '').trim() || t);
@@ -104,7 +117,7 @@ function detectLearningInstruction(userText = '') {
     if (profile) return { type: 'learn', section: 'Profile', content: `Name: ${profile[1].trim()}` };
     if (/(подобає|подобається|люблю|не люблю|предпочитаю|prefer)/i.test(payload)) return { type: 'learn', section: 'User Preferences', content: payload };
     if (/(правило|завжди|ніколи|always|never)/i.test(payload)) return { type: 'learn', section: 'Learned Rules', content: payload };
-    return { type: 'learn', section: 'Knowledge Base', content: payload };
+    return { type: 'learn', section: forceKnowledgeLog ? 'Knowledge Base' : 'Knowledge Base', content: payload };
   }
   return null;
 }
@@ -142,4 +155,4 @@ function getRecentMemory(limit = 12) {
   }
 }
 
-module.exports = { appendMemory, getRecentMemory, vaultRoot, memoryDir, handleLearningInstruction, ensureSection };
+module.exports = { appendMemory, getRecentMemory, vaultRoot, memoryDir, handleLearningInstruction, ensureSection, listBranches, getActiveBranchName };

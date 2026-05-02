@@ -11,6 +11,7 @@ const LIMIT = Number(process.env.RIELTOR_ENRICH_LIMIT || 100);
 const USE_PLAYWRIGHT_FALLBACK = (process.env.RIELTOR_USE_PLAYWRIGHT || '1') === '1';
 const ENRICH_ALL = (process.env.RIELTOR_ENRICH_ALL || '0') === '1';
 const SKIP_PARTIAL = (process.env.RIELTOR_SKIP_PARTIAL || '0') === '1';
+const PASSES = Number(process.env.RIELTOR_ENRICH_PASSES || 1);
 
 function pick(re, text) {
   const m = text.match(re);
@@ -70,7 +71,7 @@ async function extractWithPlaywright(link) {
   }
 }
 
-(async () => {
+async function runPass(passNo) {
   const rows = [];
   const pageSize = Math.min(LIMIT, 500);
   let from = 0;
@@ -93,7 +94,7 @@ async function extractWithPlaywright(link) {
   }
 
   const data = rows.slice(0, LIMIT);
-  console.log(`Rieltor enrich: ${data.length} records (ENRICH_ALL=${ENRICH_ALL}, SKIP_PARTIAL=${SKIP_PARTIAL})`);
+  console.log(`Rieltor enrich pass ${passNo}: ${data.length} records (ENRICH_ALL=${ENRICH_ALL}, SKIP_PARTIAL=${SKIP_PARTIAL})`);
 
   let updated = 0;
   let parsedAny = 0;
@@ -141,4 +142,19 @@ async function extractWithPlaywright(link) {
     fs.writeFileSync('rieltor-enrich-missing.json', JSON.stringify(missing, null, 2));
     console.log(`Rieltor enrich missing exported: ${missing.length} -> rieltor-enrich-missing.json`);
   }
+
+  return { updated, parsedAny, missing: missing.length };
+}
+
+(async () => {
+  let totalUpdated = 0;
+  for (let pass = 1; pass <= PASSES; pass += 1) {
+    const stats = await runPass(pass);
+    totalUpdated += stats.updated;
+    if (stats.updated === 0) {
+      console.log(`No updates on pass ${pass}, stopping early.`);
+      break;
+    }
+  }
+  console.log(`Rieltor enrich total updated across passes: ${totalUpdated}`);
 })();

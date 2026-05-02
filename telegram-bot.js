@@ -26,17 +26,27 @@ async function tg(method, params = {}) {
   return res.json();
 }
 
+function extractRequestedCount(text) {
+  const m = text.match(/(?:дай|покажи|знайди)?\s*(\d{1,2})\s*(?:варіант|вариант|оголош|объявл|квартир)/i);
+  if (!m) return 5;
+  return Math.min(20, Math.max(1, Number(m[1])));
+}
+
 async function findListingsByIntent(text) {
   const intent = (await parseUserIntent(text)) || {};
+  const requestedCount = extractRequestedCount(text);
   const hasOlxHint = /(\bolx\b|олх)/i.test(text);
   const hasLunHint = /(\blun\b|лун|ріелтор|rieltor)/i.test(text);
   const mixedHint = /(всіх джерел|всех источников|переміш|впереміш|mix|mixed)/i.test(text);
   const sourceHint = mixedHint ? 'both' : (hasOlxHint && hasLunHint ? 'both' : (hasOlxHint ? 'olx' : (hasLunHint ? 'lun' : null)));
-  let query = supabase.from('apartments').select('*').limit(80);
+  let query = supabase.from('apartments').select('*').limit(250);
 
   if (intent.rooms) query = query.eq('rooms', intent.rooms);
   if (intent.district) query = query.ilike('district', `%${intent.district}%`);
   if (intent.max_price) query = query.lte('price', intent.max_price);
+  if (intent.floor) query = query.eq('floor', intent.floor);
+  if (intent.floor_min) query = query.gte('floor', intent.floor_min);
+  if (intent.floor_max) query = query.lte('floor', intent.floor_max);
   if (intent.deal_type) query = query.eq('deal_type', intent.deal_type);
 
   const { data, error } = await query;
@@ -45,6 +55,7 @@ async function findListingsByIntent(text) {
   const ranked = enrichWithHeuristic(data);
   const onlyOlx = ranked.filter((x) => (x.link || '').includes('olx.ua'));
   const nonOlx = ranked.filter((x) => !(x.link || '').includes('olx.ua'));
+  const needVerifiedFloor = !!(intent.floor || intent.floor_min || intent.floor_max);
 
   let selected = ranked;
   if (sourceHint === 'olx') selected = onlyOlx.length ? onlyOlx : ranked;
@@ -61,13 +72,18 @@ async function findListingsByIntent(text) {
     selected = mixed.length ? mixed : ranked;
   }
 
-  selected = selected.slice(0, 5);
+  if (needVerifiedFloor && sourceHint !== 'olx') {
+    selected = selected.filter((x) => x.floor !== null && x.floor !== undefined);
+  }
+
+  selected = selected.slice(0, requestedCount);
 
   return {
     text: selected.map((x, i) => `${i + 1}) ${x.title || 'Квартира'} | ${x.price} ${x.currency || ''} | ${x.rooms || '?'}к | ${x.district || 'район не вказано'}\n${x.link || ''}`).join('\n\n'),
     lunFound: nonOlx.length > 0,
     olxFound: onlyOlx.length > 0,
-    sourceHint
+    sourceHint,
+    requestedCount
   };
 }
 

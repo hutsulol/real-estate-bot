@@ -13,6 +13,14 @@ const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABAS
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+function compactForUpsert(row) {
+  const out = {};
+  for (const [k, v] of Object.entries(row)) {
+    if (v !== null && v !== undefined && v !== '' ) out[k] = v;
+  }
+  return out;
+}
+
 function normalizeToApartment(card) {
   return {
     id: card.id ?? null,
@@ -90,7 +98,7 @@ async function upsertApartments(items) {
   const chunkSize = 300;
 
   for (let i = 0; i < items.length; i += chunkSize) {
-    const chunk = items.slice(i, i + chunkSize);
+    const chunk = items.slice(i, i + chunkSize).map(compactForUpsert);
     let { error } = await supabase
       .from('apartments')
       .upsert(chunk, { onConflict: 'id' });

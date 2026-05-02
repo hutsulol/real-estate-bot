@@ -28,7 +28,9 @@ async function tg(method, params = {}) {
 
 async function findListingsByIntent(text) {
   const intent = (await parseUserIntent(text)) || {};
-  const sourceHint = /(\bolx\b)/i.test(text) ? 'olx' : (/(\blun\b|ріелтор|rieltor)/i.test(text) ? 'lun' : null);
+  const hasOlxHint = /(\bolx\b|олх)/i.test(text);
+  const hasLunHint = /(\blun\b|лун|ріелтор|rieltor)/i.test(text);
+  const sourceHint = hasOlxHint && hasLunHint ? 'both' : (hasOlxHint ? 'olx' : (hasLunHint ? 'lun' : null));
   let query = supabase.from('apartments').select('*').limit(80);
 
   if (intent.rooms) query = query.eq('rooms', intent.rooms);
@@ -46,7 +48,17 @@ async function findListingsByIntent(text) {
   let selected = ranked;
   if (sourceHint === 'olx') selected = onlyOlx.length ? onlyOlx : ranked;
   else if (sourceHint === 'lun') selected = nonOlx.length ? nonOlx : ranked;
-  else selected = nonOlx.length ? nonOlx : ranked;
+  else if (sourceHint === 'both') {
+    const mixed = [];
+    const a = [...nonOlx];
+    const b = [...onlyOlx];
+    while (a.length || b.length) {
+      if (a.length) mixed.push(a.shift());
+      if (b.length) mixed.push(b.shift());
+      if (mixed.length >= 10) break;
+    }
+    selected = mixed.length ? mixed : ranked;
+  }
 
   selected = selected.slice(0, 5);
 
@@ -63,11 +75,10 @@ async function answer(text) {
   if (askForListings) {
     const result = await findListingsByIntent(text);
     if (result) {
-      let prefix = 'Ось найкращі варіанти з вашої бази:';
+      let prefix = 'Ось найкращі варіанти з вашої бази (без пріоритету джерела):';
       if (result.sourceHint === 'olx') prefix = result.olxFound ? 'Ось варіанти з OLX:' : 'OLX-варіанти не знайдено у вашій базі. Ось доступні зараз:';
       else if (result.sourceHint === 'lun') prefix = result.lunFound ? 'Ось варіанти з LUN:' : 'LUN-варіанти не знайдено — запустіть sync:lun. Ось доступні зараз:';
-      else if (result.lunFound) prefix = 'Ось найкращі варіанти (LUN у пріоритеті):';
-      else prefix = 'У вашій базі зараз переважають OLX-оголошення. LUN-варіанти не знайдено — запустіть sync:lun. Ось доступні зараз:';
+      else if (result.sourceHint === 'both') prefix = 'Ось змішаний список LUN + OLX (без пріоритету):';
       return `${prefix}\n\n${result.text}`;
     }
   }

@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "recon:lun": "node recon-lun.js"
+    "recon:lun": "node recon-lun.js",
+    "parse:lun": "node lun-parser.js"
   },
   "keywords": [],
   "author": "",

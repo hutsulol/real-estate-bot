@@ -35,16 +35,17 @@ async function parseQuery(query) {
   "district": string | null,
   "max_price": number | null,
   "deal_type": "rent" | "sale" | null,
-  "source": "olx" | "rieltor" | "all" | null
+  "source": "olx" | "rieltor" | "all" | null,
+  "floor": number | null
 }
 
 Примеры:
 
 "зняти 2к центр" →
-{"rooms":2,"district":"центр","max_price":null,"deal_type":"rent","source":"all"}
+{"rooms":2,"district":"центр","max_price":null,"deal_type":"rent","source":"all","floor":null}
 
 "купити квартиру центр" →
-{"rooms":null,"district":"центр","max_price":null,"deal_type":"sale","source":"all"}
+{"rooms":null,"district":"центр","max_price":null,"deal_type":"sale","source":"all","floor":null}
 
 Запрос:
 ${query}
@@ -162,6 +163,10 @@ app.get('/search', async (req, res) => {
 
     if (filters.max_price) {
       dbQuery = dbQuery.lte('price', filters.max_price);
+    }
+
+    if (filters.floor) {
+      dbQuery = dbQuery.eq('floor', filters.floor);
     }
 
     if (filters.deal_type) {

@@ -37,16 +37,27 @@ function enrichWithHeuristic(items) {
     .sort((a, b) => b.value_score - a.value_score || a.price - b.price);
 }
 
+function parseFloorFallback(query) {
+  const m = query.match(/(?:на|этаж|поверх|этажe|поверсі)\s*(\d{1,2})/i) || query.match(/(\d{1,2})\s*(?:этаж|поверх)/i);
+  return m ? Number(m[1]) : null;
+}
+
 async function parseUserIntent(query) {
-  if (!client) return null;
-  const prompt = `Верни JSON: {"rooms":number|null,"district":string|null,"max_price":number|null,"deal_type":"rent"|"sale"|null,"priority":"investment"|"comfort"|"balanced"}. Запрос: ${query}`;
+  if (!client) return { floor: parseFloorFallback(query) };
+  const prompt = `Верни JSON: {"rooms":number|null,"district":string|null,"max_price":number|null,"deal_type":"rent"|"sale"|null,"priority":"investment"|"comfort"|"balanced", "floor":number|null}. Запрос: ${query}`;
   const resp = await client.chat.completions.create({
     model: 'gpt-4o-mini',
     temperature: 0,
     messages: [{ role: 'user', content: prompt }],
   });
   const text = (resp.choices?.[0]?.message?.content || '').replace(/```json|```/g, '').trim();
-  try { return JSON.parse(text); } catch { return null; }
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed.floor == null) parsed.floor = parseFloorFallback(query);
+    return parsed;
+  } catch {
+    return { floor: parseFloorFallback(query) };
+  }
 }
 
 module.exports = { enrichWithHeuristic, parseUserIntent };

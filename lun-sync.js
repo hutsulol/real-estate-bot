@@ -80,15 +80,27 @@ async function collectListings() {
     .filter((x) => x.id && x.price && x.link);
 }
 
+
+function stripUnsupportedColumns(items) {
+  return items.map(({ floor, floor_count, wall_type, heating_system, support_programs, source, ...rest }) => rest);
+}
+
 async function upsertApartments(items) {
   let inserted = 0;
   const chunkSize = 300;
 
   for (let i = 0; i < items.length; i += chunkSize) {
     const chunk = items.slice(i, i + chunkSize);
-    const { error } = await supabase
+    let { error } = await supabase
       .from('apartments')
       .upsert(chunk, { onConflict: 'id' });
+
+    if (error && error.code === 'PGRST204') {
+      console.warn('Schema mismatch detected, retrying upsert without extended columns...');
+      ({ error } = await supabase
+        .from('apartments')
+        .upsert(stripUnsupportedColumns(chunk), { onConflict: 'id' }));
+    }
 
     if (error) {
       console.error('Supabase upsert error:', error);

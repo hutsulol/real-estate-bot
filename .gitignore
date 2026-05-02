@@ -1,4 +1,5 @@
 node_modules/
 recon-lun-dumps/
 recon-lun-output.txt
+*.html
 .env

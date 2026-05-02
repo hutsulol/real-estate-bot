@@ -34,16 +34,17 @@ async function parseQuery(query) {
   "rooms": number | null,
   "district": string | null,
   "max_price": number | null,
-  "deal_type": "rent" | "sale" | null
+  "deal_type": "rent" | "sale" | null,
+  "source": "olx" | "rieltor" | "all" | null
 }
 
 Примеры:
 
 "зняти 2к центр" →
-{"rooms":2,"district":"центр","max_price":null,"deal_type":"rent"}
+{"rooms":2,"district":"центр","max_price":null,"deal_type":"rent","source":"all"}
 
 "купити квартиру центр" →
-{"rooms":null,"district":"центр","max_price":null,"deal_type":"sale"}
+{"rooms":null,"district":"центр","max_price":null,"deal_type":"sale","source":"all"}
 
 Запрос:
 ${query}
@@ -112,6 +113,14 @@ function addDealScore(list) {
 }
 
 
+function detectSource(item) {
+  if (item.source) return item.source;
+  const link = item.link || '';
+  if (link.includes('olx.ua')) return 'olx';
+  if (link.includes('rieltor.ua')) return 'rieltor';
+  return 'unknown';
+}
+
 function mixSources(list, maxItems = 20) {
   const olx = list.filter((x) => (x.link || '').includes('olx.ua'));
   const other = list.filter((x) => !(x.link || '').includes('olx.ua'));
@@ -155,9 +164,14 @@ app.get('/search', async (req, res) => {
     }
 
     if (filters.deal_type) {
-  dbQuery = dbQuery.eq('deal_type', filters.deal_type);
-    }    
-    
+      dbQuery = dbQuery.eq('deal_type', filters.deal_type);
+    }
+
+    if (filters.source && filters.source !== 'all') {
+      if (filters.source === 'olx') dbQuery = dbQuery.ilike('link', '%olx.ua%');
+      if (filters.source === 'rieltor') dbQuery = dbQuery.ilike('link', '%rieltor.ua%');
+    }
+
     const { data, error } = await dbQuery.limit(300);
 
     if (error) {
@@ -175,7 +189,7 @@ app.get('/search', async (req, res) => {
     const wantsMixedSources = /(всіх джерел|всех источников|переміш|впереміш|mix|mixed)/i.test(query);
     const finalList = wantsMixedSources ? mixSources(clean, 20) : clean.slice(0, 20);
 
-    res.json(finalList);
+    res.json(finalList.map((x) => ({ ...x, source: detectSource(x) })));
 
   } catch (err) {
     console.log("❌ Server error:", err);

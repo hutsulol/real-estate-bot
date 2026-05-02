@@ -21,9 +21,18 @@ function normalizeToApartment(card) {
     currency: (card.currency || 'UAH').toUpperCase(),
     rooms: card.roomCount ?? null,
     district: card.districtName ?? null,
-    residential_complex: card.residentialComplexName ?? null,
+    residential_complex: card.residentialComplexName || card.complexName || null,
     street: card.streetName ?? null,
+    floor: card.floor ?? null,
+    floor_count: card.floorCount ?? null,
+    wall_type: card.wallTypeName ?? null,
+    heating_system: card.heatingSystemName ?? null,
+    support_programs: [
+      card.hasEOselia || card.isEOseliaAvailable ? 'єОселя' : null,
+      card.hasERecovery || card.isERecoveryAvailable ? 'єВідновлення' : null
+    ].filter(Boolean).join(', ') || null,
     link: card.urlRaw || card.url || null,
+    source: (card.urlRaw || '').includes('olx.ua') ? 'olx' : 'rieltor.ua',
     deal_type: 'sale'
   };
 }

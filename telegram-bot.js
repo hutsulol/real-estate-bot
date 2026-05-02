@@ -101,6 +101,18 @@ async function findListingsByIntent(text) {
   };
 }
 
+
+function shouldReturnListings(text) {
+  const t = String(text || '').toLowerCase();
+  const explicitListIntent = /(покажи|підбери|подбери|знайди|find|search|дай\s+\d+)/i.test(t)
+    && /(варіант|вариант|оголош|объявл|квартир|listing|пропозиц)/i.test(t);
+
+  const reflectiveIntent = /(поясни|обґрунтуй|обоснуй|чому|почему|напиши|розпиши|стратег|фактор|ризик|конкуренц|ліквідн|окупн)/i.test(t);
+  if (reflectiveIntent && !explicitListIntent) return false;
+
+  return explicitListIntent;
+}
+
 async function answer(text) {
   const learningAck = handleLearningInstruction(text);
   if (learningAck) {
@@ -108,7 +120,7 @@ async function answer(text) {
     return `${learningAck} Тепер використаю це у наступних відповідях.`;
   }
 
-  const askForListings = /(список|покажи|підбери|пропозиці|варіант|квартир|олх|olx|лун|lun|ріелтор|rieltor)/i.test(text);
+  const askForListings = shouldReturnListings(text);
   if (askForListings) {
     const result = await findListingsByIntent(text);
     if (result) {
@@ -130,7 +142,8 @@ async function answer(text) {
 - Коротко: 2-5 речень, по суті.
 - Якщо доречно, дай 1-3 конкретні критерії оцінки вигоди (ціна за м², район, ЖК, ліквідність).
 - Не повторюй попередню відповідь майже дослівно.
-- Якщо користувач просить список з бази, а даних немає, прямо скажи що у базі не знайдено.`;
+- Якщо користувач просить список з бази, а даних немає, прямо скажи що у базі не знайдено.
+- Якщо користувач просить аналітику/фактори/стратегію, НЕ повертай список оголошень, дай міркування та критерії рішення.`;
   const memory = getRecentMemory(4);
   const r = await openai.chat.completions.create({
     model: 'gpt-4o-mini',

@@ -96,6 +96,7 @@ async function extractWithPlaywright(link) {
 
   let updated = 0;
   let parsedAny = 0;
+  const missing = [];
   for (const row of data) {
     try {
       let html = null;
@@ -113,6 +114,7 @@ async function extractWithPlaywright(link) {
         payload = fromBrowser ? Object.fromEntries(Object.entries(fromBrowser).filter(([, v]) => v !== null)) : {};
       }
       if (!Object.keys(payload).length) {
+        missing.push({ id: row.id, link: row.link, reason: 'no_fields_parsed' });
         console.log(`No details parsed for ${row.id}`);
         continue;
       }
@@ -128,4 +130,9 @@ async function extractWithPlaywright(link) {
 
   console.log(`Rieltor enrich parsed_any: ${parsedAny}`);
   console.log(`Rieltor enrich updated: ${updated}`);
+  if (missing.length) {
+    const fs = require('fs');
+    fs.writeFileSync('rieltor-enrich-missing.json', JSON.stringify(missing, null, 2));
+    console.log(`Rieltor enrich missing exported: ${missing.length} -> rieltor-enrich-missing.json`);
+  }
 })();

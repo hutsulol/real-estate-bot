@@ -8,7 +8,8 @@
     "recon:lun": "node recon-lun.js",
     "parse:lun": "node lun-parser.js",
     "sync:lun": "node lun-sync.js",
-    "sync:lun:watch": "node lun-sync.js --watch"
+    "sync:lun:watch": "node lun-sync.js --watch",
+    "bot:telegram": "node telegram-bot.js"
   },
   "keywords": [],
   "author": "",

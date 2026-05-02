@@ -4,6 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const OpenAI = require('openai');
 const { createClient } = require('@supabase/supabase-js');
+const { enrichWithHeuristic, parseUserIntent } = require('./value-agent');
 
 const app = express();
 app.use(cors());
@@ -121,7 +122,8 @@ app.get('/search', async (req, res) => {
       return res.json([]);
     }
 
-    const filters = await parseQuery(query);
+    const aiFilters = await parseUserIntent(query);
+    const filters = aiFilters || await parseQuery(query);
     console.log("Фильтры:", filters);
 
     let dbQuery = supabase.from('apartments').select('*');
@@ -152,15 +154,9 @@ app.get('/search', async (req, res) => {
     // 🔥 удаляем дубликаты
     let clean = deduplicate(data);
 
-    // 🔥 считаем выгодность
+    // AI-ранжирование + выгодность
+    clean = enrichWithHeuristic(clean);
     clean = addDealScore(clean);
-
-    // 🔥 сортируем
-    clean.sort((a, b) => {
-      if (a.deal === '🔥 выгодно') return -1;
-      if (b.deal === '🔥 выгодно') return 1;
-      return a.price - b.price;
-    });
 
     res.json(clean.slice(0, 20));
 

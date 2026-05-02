@@ -111,6 +111,20 @@ function addDealScore(list) {
   });
 }
 
+
+function mixSources(list, maxItems = 20) {
+  const olx = list.filter((x) => (x.link || '').includes('olx.ua'));
+  const other = list.filter((x) => !(x.link || '').includes('olx.ua'));
+  const mixed = [];
+
+  while ((olx.length || other.length) && mixed.length < maxItems) {
+    if (other.length) mixed.push(other.shift());
+    if (olx.length && mixed.length < maxItems) mixed.push(olx.shift());
+  }
+
+  return mixed.length ? mixed : list.slice(0, maxItems);
+}
+
 // =======================
 // 🔍 Поиск
 // =======================
@@ -144,7 +158,7 @@ app.get('/search', async (req, res) => {
   dbQuery = dbQuery.eq('deal_type', filters.deal_type);
     }    
     
-    const { data, error } = await dbQuery.limit(50);
+    const { data, error } = await dbQuery.limit(300);
 
     if (error) {
       console.log("❌ Supabase error:", error);
@@ -158,7 +172,10 @@ app.get('/search', async (req, res) => {
     clean = enrichWithHeuristic(clean);
     clean = addDealScore(clean);
 
-    res.json(clean.slice(0, 20));
+    const wantsMixedSources = /(всіх джерел|всех источников|переміш|впереміш|mix|mixed)/i.test(query);
+    const finalList = wantsMixedSources ? mixSources(clean, 20) : clean.slice(0, 20);
+
+    res.json(finalList);
 
   } catch (err) {
     console.log("❌ Server error:", err);

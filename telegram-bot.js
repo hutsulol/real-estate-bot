@@ -30,7 +30,8 @@ async function findListingsByIntent(text) {
   const intent = (await parseUserIntent(text)) || {};
   const hasOlxHint = /(\bolx\b|олх)/i.test(text);
   const hasLunHint = /(\blun\b|лун|ріелтор|rieltor)/i.test(text);
-  const sourceHint = hasOlxHint && hasLunHint ? 'both' : (hasOlxHint ? 'olx' : (hasLunHint ? 'lun' : null));
+  const mixedHint = /(всіх джерел|всех источников|переміш|впереміш|mix|mixed)/i.test(text);
+  const sourceHint = mixedHint ? 'both' : (hasOlxHint && hasLunHint ? 'both' : (hasOlxHint ? 'olx' : (hasLunHint ? 'lun' : null)));
   let query = supabase.from('apartments').select('*').limit(80);
 
   if (intent.rooms) query = query.eq('rooms', intent.rooms);

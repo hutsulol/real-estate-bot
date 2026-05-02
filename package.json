@@ -6,7 +6,9 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "recon:lun": "node recon-lun.js",
-    "parse:lun": "node lun-parser.js"
+    "parse:lun": "node lun-parser.js",
+    "sync:lun": "node lun-sync.js",
+    "sync:lun:watch": "node lun-sync.js --watch"
   },
   "keywords": [],
   "author": "",

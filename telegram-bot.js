@@ -35,10 +35,11 @@ function extractRequestedCount(text) {
 async function findListingsByIntent(text) {
   const intent = (await parseUserIntent(text)) || {};
   const requestedCount = extractRequestedCount(text);
-  const hasOlxHint = /(\bolx\b|олх)/i.test(text);
+  const withoutOlx = /(без\s+олх|без\s+olx|exclude\s+olx)/i.test(text);
+  const hasOlxHint = /(\bolx\b|олх)/i.test(text) && !withoutOlx;
   const hasLunHint = /(\blun\b|лун|ріелтор|rieltor)/i.test(text);
   const mixedHint = /(всіх джерел|всех источников|переміш|впереміш|mix|mixed)/i.test(text);
-  const sourceHint = mixedHint ? 'both' : (hasOlxHint && hasLunHint ? 'both' : (hasOlxHint ? 'olx' : (hasLunHint ? 'lun' : null)));
+  const sourceHint = withoutOlx ? 'lun' : (mixedHint ? 'both' : (hasOlxHint && hasLunHint ? 'both' : (hasOlxHint ? 'olx' : (hasLunHint ? 'lun' : null))));
   let query = supabase.from('apartments').select('*').limit(250);
 
   if (intent.rooms) query = query.eq('rooms', intent.rooms);
@@ -47,7 +48,8 @@ async function findListingsByIntent(text) {
   if (intent.floor) query = query.eq('floor', intent.floor);
   if (intent.floor_min) query = query.gte('floor', intent.floor_min);
   if (intent.floor_max) query = query.lte('floor', intent.floor_max);
-  if (intent.deal_type) query = query.eq('deal_type', intent.deal_type);
+  const dealType = intent.deal_type || 'sale';
+  query = query.eq('deal_type', dealType);
 
   const { data, error } = await query;
   if (error || !data?.length) return null;

@@ -49,16 +49,24 @@ function appendToSection(sectionName, line) {
 
 function detectLearningInstruction(userText = '') {
   const t = userText.trim();
-  const sectionMatch = t.match(/(?:створи|создай)\s+розділ\s+(.+)/i) || t.match(/(?:додай|add)\s+section\s+(.+)/i);
+  const sectionMatch = t.match(/(?:створи|створимо|создай|create)\s+(?:нов(?:ий|у)\s+)?(?:розділ|секц(?:ію|ию)|гілк(?:у|а)|ветк(?:у|а)|branch)\s+(.+)/i )
+    || t.match(/(?:додай|add)\s+section\s+(.+)/i);
   if (sectionMatch) return { type: 'new_section', section: sectionMatch[1].trim() };
 
-  const learnMatch = t.match(/(?:запам'?ятай|запомни|навчись|learn)\s*[:\-]?\s*(.+)/i);
+  if (/(?:створи|створимо|создай|create).*(?:obsidian|пам\'ят|memory)/i.test(t)) {
+    return { type: 'new_section', section: 'Strategic Learning' };
+  }
+
+  const learnMatch = t.match(/(?:запам'?ятай|запомни|навчись|learn|будемо\s+навчатись|давай\s+навчатись)\s*[:\-]?\s*(.+)/i);
   if (learnMatch) {
     const payload = learnMatch[1].trim();
     const profile = payload.match(/(?:мене звати|моє ім'?я|my name is)\s+(.+)/i);
     if (profile) return { type: 'learn', section: 'Profile', content: `Name: ${profile[1].trim()}` };
     if (/(подобає|подобається|люблю|не люблю|предпочитаю|prefer)/i.test(payload)) {
       return { type: 'learn', section: 'User Preferences', content: payload };
+    }
+    if (/(вигідн|окупн|ліквідн|інвест|квартир\w*\s+краще|best buy)/i.test(payload)) {
+      return { type: 'learn', section: 'Knowledge Base', content: payload };
     }
     if (/(правило|завжди|ніколи|always|never)/i.test(payload)) {
       return { type: 'learn', section: 'Learned Rules', content: payload };

@@ -9,6 +9,7 @@ const supabase = createClient(
 
 const LIMIT = Number(process.env.RIELTOR_ENRICH_LIMIT || 100);
 const USE_PLAYWRIGHT_FALLBACK = (process.env.RIELTOR_USE_PLAYWRIGHT || '1') === '1';
+const ENRICH_ALL = (process.env.RIELTOR_ENRICH_ALL || '0') === '1';
 
 function pick(re, text) {
   const m = text.match(re);
@@ -69,17 +70,32 @@ async function extractWithPlaywright(link) {
 }
 
 (async () => {
-  const { data, error } = await supabase
-    .from('apartments')
-    .select('id,link')
-    .eq('source', 'rieltor')
-    .or('floor.is.null,floor_count.is.null,wall_type.is.null,heating_system.is.null,residential_complex.is.null')
-    .limit(LIMIT);
+  const rows = [];
+  const pageSize = Math.min(LIMIT, 500);
+  let from = 0;
+  while (rows.length < LIMIT) {
+    let q = supabase
+      .from('apartments')
+      .select('id,link,floor,floor_count,wall_type,heating_system,support_programs,residential_complex')
+      .eq('source', 'rieltor')
+      .range(from, from + pageSize - 1);
 
-  if (error) throw error;
-  console.log(`Rieltor enrich: ${data.length} records`);
+    if (!ENRICH_ALL) {
+      q = q.or('floor.is.null,floor_count.is.null,wall_type.is.null,heating_system.is.null,residential_complex.is.null,support_programs.is.null');
+    }
+
+    const { data, error } = await q;
+    if (error) throw error;
+    if (!data.length) break;
+    rows.push(...data);
+    from += pageSize;
+  }
+
+  const data = rows.slice(0, LIMIT);
+  console.log(`Rieltor enrich: ${data.length} records (ENRICH_ALL=${ENRICH_ALL})`);
 
   let updated = 0;
+  let parsedAny = 0;
   for (const row of data) {
     try {
       let html = null;
@@ -101,10 +117,15 @@ async function extractWithPlaywright(link) {
         continue;
       }
 
+      parsedAny += 1;
+      const changed = Object.entries(payload).some(([k, v]) => row[k] !== v);
+      if (!changed) continue;
+
       const { error: upErr } = await supabase.from('apartments').update(payload).eq('id', row.id);
       if (!upErr) updated += 1;
     } catch {}
   }
 
+  console.log(`Rieltor enrich parsed_any: ${parsedAny}`);
   console.log(`Rieltor enrich updated: ${updated}`);
 })();

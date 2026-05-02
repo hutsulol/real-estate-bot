@@ -1,7 +1,10 @@
 require('dotenv').config();
 const OpenAI = require('openai');
 
-const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const TELEGRAM_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '')
+  .trim()
+  .replace(/[‒–—―−]/g, '-')
+  .replace(/^bot/i, '');
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 if (!TELEGRAM_TOKEN) throw new Error('Set TELEGRAM_BOT_TOKEN in .env');
@@ -25,7 +28,15 @@ async function answer(text) {
 
 (async () => {
   let offset = 0;
-  console.log('Telegram bot polling started');
+
+  try {
+    const me = await tg('getMe');
+    if (!me.ok) throw new Error(JSON.stringify(me));
+    console.log(`Telegram bot polling started as @${me.result.username}`);
+  } catch (e) {
+    console.error('Telegram init error:', e.message);
+    process.exit(1);
+  }
   while (true) {
     try {
       const updates = await tg('getUpdates', { timeout: 30, offset });

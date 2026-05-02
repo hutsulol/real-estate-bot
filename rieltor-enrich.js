@@ -79,7 +79,7 @@ async function runPass(passNo) {
     let q = supabase
       .from('apartments')
       .select('id,link,floor,floor_count,wall_type,heating_system,support_programs,residential_complex')
-      .eq('source', 'rieltor')
+      .in('source', ['rieltor', 'rieltor.ua'])
       .range(from, from + pageSize - 1);
 
     if (!ENRICH_ALL) {

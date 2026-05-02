@@ -10,3 +10,5 @@ npm.cmd run enrich:rieltor
 
 Write-Host 'Done. Generating SQL check query:'
 Write-Host "select count(*) as missing_count from apartments where source='rieltor' and (floor is null or floor_count is null or wall_type is null or heating_system is null or residential_complex is null);"
+
+Write-Host "Tip: normalize source values in DB once: update apartments set source='rieltor' where source in ('rieltor','rieltor.ua');"

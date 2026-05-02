@@ -38,17 +38,26 @@ async function findListingsByIntent(text) {
   const { data, error } = await query;
   if (error || !data?.length) return null;
 
-  const ranked = enrichWithHeuristic(data).slice(0, 5);
-  return ranked.map((x, i) => `${i + 1}) ${x.title || 'Квартира'} | ${x.price} ${x.currency || ''} | ${x.rooms || '?'}к | ${x.district || 'район не вказано'}\n${x.link || ''}`).join('\n\n');
+  const ranked = enrichWithHeuristic(data);
+  const lunFirst = ranked.filter((x) => !(x.link || '').includes('olx.ua'));
+  const selected = (lunFirst.length ? lunFirst : ranked).slice(0, 5);
+
+  return {
+    text: selected.map((x, i) => `${i + 1}) ${x.title || 'Квартира'} | ${x.price} ${x.currency || ''} | ${x.rooms || '?'}к | ${x.district || 'район не вказано'}\n${x.link || ''}`).join('\n\n'),
+    lunFound: lunFirst.length > 0
+  };
 }
 
 async function answer(text) {
   const askForListings = /(список|покажи|підбери|пропозиці|варіант|квартир)/i.test(text);
   if (askForListings) {
-    const list = await findListingsByIntent(text);
-    if (list) return `Ось найкращі варіанти з вашої бази даних:
-
-${list}`;
+    const result = await findListingsByIntent(text);
+    if (result) {
+      const prefix = result.lunFound
+        ? 'Ось найкращі варіанти (LUN у пріоритеті):'
+        : 'У вашій базі зараз переважають OLX-оголошення. LUN-варіанти не знайдено — запустіть sync:lun. Ось доступні зараз:';
+      return `${prefix}\n\n${result.text}`;
+    }
   }
 
   const system = `Ти AI-асистент з нерухомості. ВІДПОВІДАЙ ЛИШЕ УКРАЇНСЬКОЮ мовою, навіть якщо користувач пише іншою.

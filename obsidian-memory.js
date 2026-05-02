@@ -95,8 +95,12 @@ function detectLearningInstruction(userText = '') {
 
   const learnMatch = t.match(/(?:запам'?ятай|запомни|навчись|learn|будемо\s+навчатись|давай\s+навчатись|запиши\s+це|запиши\s+в)/i);
   if (learnMatch) {
-    const payload = t.replace(/^(?:запам'?ятай|запомни|навчись|learn|будемо\s+навчатись|давай\s+навчатись|запиши\s+це|запиши\s+в)\s*[:\-]?\s*/i, '').trim() || t;
+    const writeThis = /^(?:так,?\s*)?(?:запиши\s+це)(?:\s+в.*)?$/i.test(t);
+    const payload = writeThis
+      ? (contextText || '').trim()
+      : (t.replace(/^(?:запам'?ятай|запомни|навчись|learn|будемо\s+навчатись|давай\s+навчатись|запиши\s+це|запиши\s+в)\s*[:\-]?\s*/i, '').trim() || t);
     const profile = payload.match(/(?:мене звати|моє ім'?я|my name is)\s+(.+)/i);
+    if (!payload) return { type: 'noop' };
     if (profile) return { type: 'learn', section: 'Profile', content: `Name: ${profile[1].trim()}` };
     if (/(подобає|подобається|люблю|не люблю|предпочитаю|prefer)/i.test(payload)) return { type: 'learn', section: 'User Preferences', content: payload };
     if (/(правило|завжди|ніколи|always|never)/i.test(payload)) return { type: 'learn', section: 'Learned Rules', content: payload };
@@ -105,9 +109,10 @@ function detectLearningInstruction(userText = '') {
   return null;
 }
 
-function handleLearningInstruction(userText = '') {
+function handleLearningInstruction(userText = '', contextText = '') {
   const ins = detectLearningInstruction(userText);
   if (!ins) return null;
+  if (ins.type === 'noop') return "Немає що записувати: дай текст або попроси 'запам'ятай: ...'.";
 
   if (ins.type === 'new_branch') {
     const file = switchToBranch(ins.section);

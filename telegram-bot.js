@@ -102,6 +102,8 @@ async function findListingsByIntent(text) {
 }
 
 
+const lastAssistantReplyByChat = new Map();
+
 function shouldReturnListings(text) {
   const t = String(text || '').toLowerCase();
   const explicitListIntent = /(покажи|підбери|подбери|знайди|find|search|дай\s+\d+)/i.test(t)
@@ -113,11 +115,13 @@ function shouldReturnListings(text) {
   return explicitListIntent;
 }
 
-async function answer(text) {
-  const learningAck = handleLearningInstruction(text);
+async function answer(text, chatId = 'default') {
+  const learningAck = handleLearningInstruction(text, lastAssistantReplyByChat.get(String(chatId)) || '');
   if (learningAck) {
     appendMemory({ userText: text, replyText: learningAck, intent: null, listMode: 'learning' });
-    return `${learningAck} Тепер використаю це у наступних відповідях.`;
+    const out = `${learningAck} Тепер використаю це у наступних відповідях.`;
+    lastAssistantReplyByChat.set(String(chatId), out);
+    return out;
   }
 
   const askForListings = shouldReturnListings(text);
@@ -132,6 +136,7 @@ async function answer(text) {
       else if (result.sourceHint === 'both') prefix = 'Ось змішаний список LUN + OLX (без пріоритету):';
       const responseText = `${prefix}\n\n${result.text}`;
       appendMemory({ userText: text, replyText: responseText, intent: result.intent, listMode: result.listMode });
+      lastAssistantReplyByChat.set(String(chatId), responseText);
       return responseText;
     }
   }
@@ -156,6 +161,7 @@ async function answer(text) {
   });
   const reply = r.choices?.[0]?.message?.content || 'Вибач, не вдалося сформувати відповідь.';
   appendMemory({ userText: text, replyText: reply, intent: null, listMode: 'dialog' });
+  lastAssistantReplyByChat.set(String(chatId), reply);
   return reply;
 }
 
@@ -179,7 +185,7 @@ async function answer(text) {
         const chatId = u.message?.chat?.id;
         const text = u.message?.text;
         if (!chatId || !text) continue;
-        const reply = await answer(text);
+        const reply = await answer(text, chatId);
         await tg('sendMessage', { chat_id: chatId, text: reply });
       }
     } catch (e) {

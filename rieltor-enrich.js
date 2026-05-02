@@ -1,5 +1,6 @@
 require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
+const { chromium } = require('playwright');
 
 const supabase = createClient(
   process.env.SUPABASE_URL || 'https://ixxvfvtdomhenwqhpyqj.supabase.co',
@@ -7,6 +8,7 @@ const supabase = createClient(
 );
 
 const LIMIT = Number(process.env.RIELTOR_ENRICH_LIMIT || 100);
+const USE_PLAYWRIGHT_FALLBACK = (process.env.RIELTOR_USE_PLAYWRIGHT || '1') === '1';
 
 function pick(re, text) {
   const m = text.match(re);
@@ -49,6 +51,23 @@ function extractDetails(html) {
   };
 }
 
+
+async function extractWithPlaywright(link) {
+  if (!USE_PLAYWRIGHT_FALLBACK) return null;
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({ userAgent: 'Mozilla/5.0' });
+  try {
+    await page.goto(link, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await page.waitForTimeout(1200);
+    const html = await page.content();
+    return extractDetails(html);
+  } catch {
+    return null;
+  } finally {
+    await browser.close();
+  }
+}
+
 (async () => {
   const { data, error } = await supabase
     .from('apartments')
@@ -72,7 +91,11 @@ function extractDetails(html) {
       if (!html) continue;
       const details = extractDetails(html);
 
-      const payload = Object.fromEntries(Object.entries(details).filter(([, v]) => v !== null));
+      let payload = Object.fromEntries(Object.entries(details).filter(([, v]) => v !== null));
+      if (!Object.keys(payload).length) {
+        const fromBrowser = await extractWithPlaywright(row.link);
+        payload = fromBrowser ? Object.fromEntries(Object.entries(fromBrowser).filter(([, v]) => v !== null)) : {};
+      }
       if (!Object.keys(payload).length) {
         console.log(`No details parsed for ${row.id}`);
         continue;

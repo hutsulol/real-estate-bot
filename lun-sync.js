@@ -10,6 +10,7 @@ const UPDATE_EVERY_MS = Number(process.env.LUN_SYNC_INTERVAL_MS || 60 * 60 * 100
 
 const supabaseUrl = process.env.SUPABASE_URL || 'https://ixxvfvtdomhenwqhpyqj.supabase.co';
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || 'sb_publishable_7SWFWo2-TZLFKtWWZbLwxQ_aDbp_JNC';
+
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 function normalizeToApartment(card) {
@@ -23,8 +24,7 @@ function normalizeToApartment(card) {
     residential_complex: card.residentialComplexName ?? null,
     street: card.streetName ?? null,
     link: card.urlRaw || card.url || null,
-    deal_type: 'sale',
-    source: 'lun'
+    deal_type: 'sale'
   };
 }
 
@@ -65,7 +65,10 @@ async function collectListings() {
 
   const byId = new Map();
   for (const c of merged) if (c?.id) byId.set(c.id, c);
-  return [...byId.values()].map(normalizeToApartment).filter(x => x.id && x.price);
+
+  return [...byId.values()]
+    .map(normalizeToApartment)
+    .filter((x) => x.id && x.price && x.link);
 }
 
 async function upsertApartments(items) {
@@ -78,7 +81,10 @@ async function upsertApartments(items) {
       .from('apartments')
       .upsert(chunk, { onConflict: 'id' });
 
-    if (error) throw error;
+    if (error) {
+      console.error('Supabase upsert error:', error);
+      throw error;
+    }
     inserted += chunk.length;
   }
 
@@ -89,6 +95,7 @@ async function runOnce() {
   console.log(`[${new Date().toISOString()}] Sync started`);
   const listings = await collectListings();
   fs.writeFileSync('data-lun.json', JSON.stringify(listings, null, 2));
+  console.log(`Prepared ${listings.length} LUN listings for DB upsert`);
   const count = await upsertApartments(listings);
   console.log(`[${new Date().toISOString()}] Sync finished: ${count} upserted`);
 }
@@ -96,7 +103,12 @@ async function runOnce() {
 (async () => {
   const watch = process.argv.includes('--watch');
 
-  await runOnce();
+  try {
+    await runOnce();
+  } catch (e) {
+    console.error('Initial sync failed:', e.message);
+    process.exit(1);
+  }
 
   if (watch) {
     console.log(`Watch mode ON, every ${Math.round(UPDATE_EVERY_MS / 60000)} min`);

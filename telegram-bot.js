@@ -28,7 +28,8 @@ async function tg(method, params = {}) {
 
 async function findListingsByIntent(text) {
   const intent = (await parseUserIntent(text)) || {};
-  let query = supabase.from('apartments').select('*').limit(40);
+  const sourceHint = /(\bolx\b)/i.test(text) ? 'olx' : (/(\blun\b|ріелтор|rieltor)/i.test(text) ? 'lun' : null);
+  let query = supabase.from('apartments').select('*').limit(80);
 
   if (intent.rooms) query = query.eq('rooms', intent.rooms);
   if (intent.district) query = query.ilike('district', `%${intent.district}%`);
@@ -39,23 +40,34 @@ async function findListingsByIntent(text) {
   if (error || !data?.length) return null;
 
   const ranked = enrichWithHeuristic(data);
-  const lunFirst = ranked.filter((x) => !(x.link || '').includes('olx.ua'));
-  const selected = (lunFirst.length ? lunFirst : ranked).slice(0, 5);
+  const onlyOlx = ranked.filter((x) => (x.link || '').includes('olx.ua'));
+  const nonOlx = ranked.filter((x) => !(x.link || '').includes('olx.ua'));
+
+  let selected = ranked;
+  if (sourceHint === 'olx') selected = onlyOlx.length ? onlyOlx : ranked;
+  else if (sourceHint === 'lun') selected = nonOlx.length ? nonOlx : ranked;
+  else selected = nonOlx.length ? nonOlx : ranked;
+
+  selected = selected.slice(0, 5);
 
   return {
     text: selected.map((x, i) => `${i + 1}) ${x.title || 'Квартира'} | ${x.price} ${x.currency || ''} | ${x.rooms || '?'}к | ${x.district || 'район не вказано'}\n${x.link || ''}`).join('\n\n'),
-    lunFound: lunFirst.length > 0
+    lunFound: nonOlx.length > 0,
+    olxFound: onlyOlx.length > 0,
+    sourceHint
   };
 }
 
 async function answer(text) {
-  const askForListings = /(список|покажи|підбери|пропозиці|варіант|квартир)/i.test(text);
+  const askForListings = /(список|покажи|підбери|пропозиці|варіант|квартир|олх|olx|лун|lun|ріелтор|rieltor)/i.test(text);
   if (askForListings) {
     const result = await findListingsByIntent(text);
     if (result) {
-      const prefix = result.lunFound
-        ? 'Ось найкращі варіанти (LUN у пріоритеті):'
-        : 'У вашій базі зараз переважають OLX-оголошення. LUN-варіанти не знайдено — запустіть sync:lun. Ось доступні зараз:';
+      let prefix = 'Ось найкращі варіанти з вашої бази:';
+      if (result.sourceHint === 'olx') prefix = result.olxFound ? 'Ось варіанти з OLX:' : 'OLX-варіанти не знайдено у вашій базі. Ось доступні зараз:';
+      else if (result.sourceHint === 'lun') prefix = result.lunFound ? 'Ось варіанти з LUN:' : 'LUN-варіанти не знайдено — запустіть sync:lun. Ось доступні зараз:';
+      else if (result.lunFound) prefix = 'Ось найкращі варіанти (LUN у пріоритеті):';
+      else prefix = 'У вашій базі зараз переважають OLX-оголошення. LUN-варіанти не знайдено — запустіть sync:lun. Ось доступні зараз:';
       return `${prefix}\n\n${result.text}`;
     }
   }

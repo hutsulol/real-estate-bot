@@ -2,7 +2,7 @@ require('dotenv').config();
 const OpenAI = require('openai');
 const { createClient } = require('@supabase/supabase-js');
 const { parseUserIntent, enrichWithHeuristic } = require('./value-agent');
-const { appendMemory, getRecentMemory, vaultRoot } = require('./obsidian-memory');
+const { appendMemory, getRecentMemory, vaultRoot, handleLearningInstruction } = require('./obsidian-memory');
 
 const TELEGRAM_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '')
   .trim()
@@ -102,6 +102,12 @@ async function findListingsByIntent(text) {
 }
 
 async function answer(text) {
+  const learningAck = handleLearningInstruction(text);
+  if (learningAck) {
+    appendMemory({ userText: text, replyText: learningAck, intent: null, listMode: 'learning' });
+    return `${learningAck} Тепер використаю це у наступних відповідях.`;
+  }
+
   const askForListings = /(список|покажи|підбери|пропозиці|варіант|квартир|олх|olx|лун|lun|ріелтор|rieltor)/i.test(text);
   if (askForListings) {
     const result = await findListingsByIntent(text);

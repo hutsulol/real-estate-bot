@@ -11,7 +11,8 @@
     "sync:lun:watch": "node lun-sync.js --watch",
     "bot:telegram": "node telegram-bot.js",
     "enrich:rieltor": "node rieltor-enrich.js",
-    "enrich:rieltor:all": "powershell -ExecutionPolicy Bypass -File ./enrich-rieltor-all.ps1"
+    "enrich:rieltor:all": "powershell -ExecutionPolicy Bypass -File ./enrich-rieltor-all.ps1",
+    "memory:show": "tail -n 80 memory-vault/real-estate-agent-memory.md"
   },
   "keywords": [],
   "author": "",

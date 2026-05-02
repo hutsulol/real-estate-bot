@@ -2,6 +2,7 @@ require('dotenv').config();
 const OpenAI = require('openai');
 const { createClient } = require('@supabase/supabase-js');
 const { parseUserIntent, enrichWithHeuristic } = require('./value-agent');
+const { appendMemory, getRecentMemory, vaultRoot } = require('./obsidian-memory');
 
 const TELEGRAM_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '')
   .trim()
@@ -32,8 +33,17 @@ function extractRequestedCount(text) {
   return Math.min(20, Math.max(1, Number(m[1])));
 }
 
+
+function detectListMode(text, intent = {}) {
+  if (/(найгірш|гірш|worst|дешев(ий|і)\s*по\s*якості|переоцінен)/i.test(text)) return 'worst';
+  if (/(найкращ|топ|best|вигідн|інвест)/i.test(text)) return 'best';
+  if (intent.priority === 'investment') return 'best';
+  return 'best';
+}
+
 async function findListingsByIntent(text) {
   const intent = (await parseUserIntent(text)) || {};
+  const listMode = detectListMode(text, intent);
   const requestedCount = extractRequestedCount(text);
   const withoutOlx = /(без\s+олх|без\s+olx|exclude\s+olx)/i.test(text);
   const hasOlxHint = /(\bolx\b|олх)/i.test(text) && !withoutOlx;
@@ -78,14 +88,16 @@ async function findListingsByIntent(text) {
     selected = selected.filter((x) => x.floor !== null && x.floor !== undefined);
   }
 
-  selected = selected.slice(0, requestedCount);
+  selected = (listMode === 'worst' ? [...selected].reverse() : selected).slice(0, requestedCount);
 
   return {
     text: selected.map((x, i) => `${i + 1}) ${x.title || 'Квартира'} | ${x.price} ${x.currency || ''} | ${x.rooms || '?'}к | ${x.district || 'район не вказано'}\n${x.link || ''}`).join('\n\n'),
     lunFound: nonOlx.length > 0,
     olxFound: onlyOlx.length > 0,
     sourceHint,
-    requestedCount
+    requestedCount,
+    intent,
+    listMode
   };
 }
 
@@ -94,11 +106,15 @@ async function answer(text) {
   if (askForListings) {
     const result = await findListingsByIntent(text);
     if (result) {
-      let prefix = 'Ось найкращі варіанти з вашої бази (без пріоритету джерела):';
+      let prefix = result.listMode === 'worst'
+        ? 'Ось найгірші (найменш вигідні) варіанти з вашої бази:'
+        : 'Ось найкращі варіанти з вашої бази (без пріоритету джерела):';
       if (result.sourceHint === 'olx') prefix = result.olxFound ? 'Ось варіанти з OLX:' : 'OLX-варіанти не знайдено у вашій базі. Ось доступні зараз:';
       else if (result.sourceHint === 'lun') prefix = result.lunFound ? 'Ось варіанти з LUN:' : 'LUN-варіанти не знайдено — запустіть sync:lun. Ось доступні зараз:';
       else if (result.sourceHint === 'both') prefix = 'Ось змішаний список LUN + OLX (без пріоритету):';
-      return `${prefix}\n\n${result.text}`;
+      const responseText = `${prefix}\n\n${result.text}`;
+      appendMemory({ userText: text, replyText: responseText, intent: result.intent, listMode: result.listMode });
+      return responseText;
     }
   }
 
@@ -109,15 +125,19 @@ async function answer(text) {
 - Якщо доречно, дай 1-3 конкретні критерії оцінки вигоди (ціна за м², район, ЖК, ліквідність).
 - Не повторюй попередню відповідь майже дослівно.
 - Якщо користувач просить список з бази, а даних немає, прямо скажи що у базі не знайдено.`;
+  const memory = getRecentMemory(4);
   const r = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
     temperature: 0.3,
     messages: [
       { role: 'system', content: system },
+      ...(memory ? [{ role: 'system', content: `Пам'ять агента (Obsidian нотатки, стисло):\n${memory}` }] : []),
       { role: 'user', content: text }
     ]
   });
-  return r.choices?.[0]?.message?.content || 'Вибач, не вдалося сформувати відповідь.';
+  const reply = r.choices?.[0]?.message?.content || 'Вибач, не вдалося сформувати відповідь.';
+  appendMemory({ userText: text, replyText: reply, intent: null, listMode: 'dialog' });
+  return reply;
 }
 
 (async () => {
@@ -127,6 +147,7 @@ async function answer(text) {
     const me = await tg('getMe');
     if (!me.ok) throw new Error(JSON.stringify(me));
     console.log(`Telegram bot polling started as @${me.result.username}`);
+    console.log(`Obsidian memory vault: ${vaultRoot}`);
   } catch (e) {
     console.error('Telegram init error:', e.message);
     process.exit(1);

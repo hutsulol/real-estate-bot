@@ -1,5 +1,7 @@
 require('dotenv').config();
 const OpenAI = require('openai');
+const { createClient } = require('@supabase/supabase-js');
+const { parseUserIntent, enrichWithHeuristic } = require('./value-agent');
 
 const TELEGRAM_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '')
   .trim()
@@ -12,6 +14,10 @@ if (!OPENAI_API_KEY) throw new Error('Set OPENAI_API_KEY in .env');
 
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 const api = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
+const supabase = createClient(
+  process.env.SUPABASE_URL || 'https://ixxvfvtdomhenwqhpyqj.supabase.co',
+  process.env.SUPABASE_ANON_KEY || 'sb_publishable_7SWFWo2-TZLFKtWWZbLwxQ_aDbp_JNC'
+);
 
 async function tg(method, params = {}) {
   const res = await fetch(`${api}/${method}`, {
@@ -20,13 +26,38 @@ async function tg(method, params = {}) {
   return res.json();
 }
 
+async function findListingsByIntent(text) {
+  const intent = (await parseUserIntent(text)) || {};
+  let query = supabase.from('apartments').select('*').limit(40);
+
+  if (intent.rooms) query = query.eq('rooms', intent.rooms);
+  if (intent.district) query = query.ilike('district', `%${intent.district}%`);
+  if (intent.max_price) query = query.lte('price', intent.max_price);
+  if (intent.deal_type) query = query.eq('deal_type', intent.deal_type);
+
+  const { data, error } = await query;
+  if (error || !data?.length) return null;
+
+  const ranked = enrichWithHeuristic(data).slice(0, 5);
+  return ranked.map((x, i) => `${i + 1}) ${x.title || 'Квартира'} | ${x.price} ${x.currency || ''} | ${x.rooms || '?'}к | ${x.district || 'район не вказано'}\n${x.link || ''}`).join('\n\n');
+}
+
 async function answer(text) {
+  const askForListings = /(список|покажи|підбери|пропозиці|варіант|квартир)/i.test(text);
+  if (askForListings) {
+    const list = await findListingsByIntent(text);
+    if (list) return `Ось найкращі варіанти з вашої бази даних:
+
+${list}`;
+  }
+
   const system = `Ти AI-асистент з нерухомості. ВІДПОВІДАЙ ЛИШЕ УКРАЇНСЬКОЮ мовою, навіть якщо користувач пише іншою.
 Правила:
 - Без копіпасти і шаблонних довгих списків.
 - Коротко: 2-5 речень, по суті.
 - Якщо доречно, дай 1-3 конкретні критерії оцінки вигоди (ціна за м², район, ЖК, ліквідність).
-- Не повторюй попередню відповідь майже дослівно.`;
+- Не повторюй попередню відповідь майже дослівно.
+- Якщо користувач просить список з бази, а даних немає, прямо скажи що у базі не знайдено.`;
   const r = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
     temperature: 0.3,

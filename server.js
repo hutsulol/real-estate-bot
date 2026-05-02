@@ -140,6 +140,7 @@ function mixSources(list, maxItems = 20) {
 app.get('/search', async (req, res) => {
   try {
     const query = req.query.q;
+    const sourceParam = req.query.source;
 
     if (!query) {
       return res.json([]);
@@ -167,9 +168,10 @@ app.get('/search', async (req, res) => {
       dbQuery = dbQuery.eq('deal_type', filters.deal_type);
     }
 
-    if (filters.source && filters.source !== 'all') {
-      if (filters.source === 'olx') dbQuery = dbQuery.ilike('link', '%olx.ua%');
-      if (filters.source === 'rieltor') dbQuery = dbQuery.ilike('link', '%rieltor.ua%');
+    const effectiveSource = sourceParam || filters.source;
+    if (effectiveSource && effectiveSource !== 'all') {
+      if (effectiveSource === 'olx') dbQuery = dbQuery.ilike('link', '%olx.ua%');
+      if (effectiveSource === 'rieltor' || effectiveSource === 'rieltor.ua') dbQuery = dbQuery.ilike('link', '%rieltor.ua%');
     }
 
     const { data, error } = await dbQuery.limit(300);
@@ -189,7 +191,17 @@ app.get('/search', async (req, res) => {
     const wantsMixedSources = /(всіх джерел|всех источников|переміш|впереміш|mix|mixed)/i.test(query);
     const finalList = wantsMixedSources ? mixSources(clean, 20) : clean.slice(0, 20);
 
-    res.json(finalList.map((x) => ({ ...x, source: detectSource(x) })));
+    res.json(finalList.map((x) => ({
+      ...x,
+      source: detectSource(x),
+      details: {
+        floor: x.floor ?? null,
+        floor_count: x.floor_count ?? null,
+        wall_type: x.wall_type ?? null,
+        heating_system: x.heating_system ?? null,
+        support_programs: x.support_programs ?? null,
+      }
+    })));
 
   } catch (err) {
     console.log("❌ Server error:", err);

@@ -10,6 +10,7 @@ const supabase = createClient(
 const LIMIT = Number(process.env.RIELTOR_ENRICH_LIMIT || 100);
 const USE_PLAYWRIGHT_FALLBACK = (process.env.RIELTOR_USE_PLAYWRIGHT || '1') === '1';
 const ENRICH_ALL = (process.env.RIELTOR_ENRICH_ALL || '0') === '1';
+const SKIP_PARTIAL = (process.env.RIELTOR_SKIP_PARTIAL || '0') === '1';
 
 function pick(re, text) {
   const m = text.match(re);
@@ -92,13 +93,18 @@ async function extractWithPlaywright(link) {
   }
 
   const data = rows.slice(0, LIMIT);
-  console.log(`Rieltor enrich: ${data.length} records (ENRICH_ALL=${ENRICH_ALL})`);
+  console.log(`Rieltor enrich: ${data.length} records (ENRICH_ALL=${ENRICH_ALL}, SKIP_PARTIAL=${SKIP_PARTIAL})`);
 
   let updated = 0;
   let parsedAny = 0;
   const missing = [];
   for (const row of data) {
     try {
+      const hasAnyEnriched = row.floor !== null || row.floor_count !== null || row.wall_type !== null || row.heating_system !== null || row.residential_complex !== null || row.support_programs !== null;
+      const hasComplete = row.floor !== null && row.floor_count !== null && row.wall_type !== null && row.heating_system !== null && row.residential_complex !== null;
+
+      if (hasComplete) continue;
+      if (SKIP_PARTIAL && hasAnyEnriched) continue;
       let html = null;
       for (let attempt = 1; attempt <= 3; attempt += 1) {
         const res = await fetch(row.link, { headers: { 'user-agent': 'Mozilla/5.0' } });

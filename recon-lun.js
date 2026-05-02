@@ -135,6 +135,83 @@ function safeName(target, suffix) {
       fs.writeFileSync(htmlPath, html);
       log(`HTML saved: ${htmlPath} (${html.length}B)`);
 
+      // Inspect inline <script> tags + DOM cards
+      const scriptInfo = await page.evaluate(() => {
+        const scripts = Array.from(document.querySelectorAll('script'));
+        const out = [];
+        scripts.forEach((s, idx) => {
+          const txt = s.textContent || '';
+          if (txt.length < 500) return;
+          // Score: presence of listing-ish keywords
+          const m = txt.match(/price|priceUsd|realtyId|roomCount|fullArea|advertisement|insertTime|"id":\s*\d+/gi);
+          out.push({
+            idx,
+            id: s.id || null,
+            type: s.type || null,
+            len: txt.length,
+            score: m ? m.length : 0,
+            head: txt.slice(0, 200),
+          });
+        });
+        // Common SSR/data hooks
+        const globals = {};
+        ['__NEXT_DATA__', '__INITIAL_STATE__', '__APOLLO_STATE__', '__NUXT__', '__PRELOADED_STATE__'].forEach(
+          (k) => {
+            globals[k] = typeof window[k] !== 'undefined';
+          }
+        );
+        // Count anchors/cards
+        const sample = (sel, n = 3) =>
+          Array.from(document.querySelectorAll(sel))
+            .slice(0, n)
+            .map((el) => el.outerHTML.slice(0, 220));
+        const counts = {
+          'a[href*="/realty/"]': document.querySelectorAll('a[href*="/realty/"]').length,
+          'a[href*="/sale/"]': document.querySelectorAll('a[href*="/sale/"]').length,
+          'a[href*="/flat/"]': document.querySelectorAll('a[href*="/flat/"]').length,
+          'article': document.querySelectorAll('article').length,
+          '[data-testid]': document.querySelectorAll('[data-testid]').length,
+          '[class*="card" i]': document.querySelectorAll('[class*="card" i]').length,
+          '[class*="Card" i]': document.querySelectorAll('[class*="Card" i]').length,
+          '[class*="listing" i]': document.querySelectorAll('[class*="listing" i]').length,
+        };
+        const samples = {
+          'a[href*="/realty/"]': sample('a[href*="/realty/"]'),
+          'article': sample('article'),
+          '[data-testid]': sample('[data-testid]'),
+        };
+        return { scripts: out, globals, counts, samples };
+      });
+
+      log(`\nWindow globals: ${JSON.stringify(scriptInfo.globals)}`);
+      log(`DOM card counts:`);
+      for (const [k, v] of Object.entries(scriptInfo.counts)) log(`  ${k}: ${v}`);
+      for (const [k, arr] of Object.entries(scriptInfo.samples)) {
+        if (arr.length) {
+          log(`  sample ${k}:`);
+          arr.forEach((h) => log(`    ${h.replace(/\s+/g, ' ')}`));
+        }
+      }
+
+      // Save top-3 highest-scoring inline scripts
+      const topScripts = scriptInfo.scripts
+        .filter((s) => s.score > 0)
+        .sort((a, b) => b.score - a.score || b.len - a.len)
+        .slice(0, 3);
+      log(`\nInline <script> blocks with listing keywords (top 3):`);
+      for (const s of topScripts) {
+        log(`  idx=${s.idx} id=${s.id} type=${s.type} len=${s.len} score=${s.score}`);
+        log(`    head: ${s.head.replace(/\s+/g, ' ').slice(0, 160)}`);
+        const full = await page
+          .evaluate((idx) => document.querySelectorAll('script')[idx]?.textContent || '', s.idx)
+          .catch(() => '');
+        if (full) {
+          const sp = path.join(DUMP_DIR, safeName(t, `script-${s.idx}`) + '.txt');
+          fs.writeFileSync(sp, full);
+          log(`    saved: ${sp}`);
+        }
+      }
+
       // Extract __NEXT_DATA__
       const nextData = await page
         .$eval('script#__NEXT_DATA__', (el) => el.textContent)

@@ -12,7 +12,7 @@
     "bot:telegram": "node telegram-bot.js",
     "enrich:rieltor": "node rieltor-enrich.js",
     "enrich:rieltor:all": "powershell -ExecutionPolicy Bypass -File ./enrich-rieltor-all.ps1",
-    "memory:show": "tail -n 80 memory-vault/real-estate-agent-memory.md"
+    "memory:show": "f=$(cat memory-vault/agent-memory/.active-memory.txt 2>/dev/null || echo real-estate-agent-memory.md); tail -n 120 memory-vault/agent-memory/$f"
   },
   "keywords": [],
   "author": "",

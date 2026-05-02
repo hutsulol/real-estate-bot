@@ -55,7 +55,7 @@ function parseFloorFallback(query) {
 }
 
 async function parseUserIntent(query) {
-  if (!client) return parseFloorFallback(query);
+  if (!client) return { ...parseFloorFallback(query), parser_source: 'fallback_no_model' };
   const prompt = `Верни JSON: {"rooms":number|null,"district":string|null,"max_price":number|null,"deal_type":"rent"|"sale"|null,"priority":"investment"|"comfort"|"balanced", "floor":number|null, "floor_min":number|null, "floor_max":number|null}. Запрос: ${query}`;
   const resp = await client.chat.completions.create({
     model: 'gpt-4o-mini',
@@ -66,12 +66,21 @@ async function parseUserIntent(query) {
   try {
     const parsed = JSON.parse(text);
     const fb = parseFloorFallback(query);
-    if (parsed.floor == null) parsed.floor = fb.floor;
     if (parsed.floor_min == null) parsed.floor_min = fb.floor_min;
     if (parsed.floor_max == null) parsed.floor_max = fb.floor_max;
+    if (parsed.floor == null) parsed.floor = fb.floor;
+
+    // If range was clearly detected in text, prefer range over single floor from model
+    if (fb.floor_min !== null || fb.floor_max !== null) {
+      parsed.floor = null;
+      parsed.floor_min = fb.floor_min ?? parsed.floor_min;
+      parsed.floor_max = fb.floor_max ?? parsed.floor_max;
+    }
+
+    parsed.parser_source = 'openai';
     return parsed;
   } catch {
-    return parseFloorFallback(query);
+    return { ...parseFloorFallback(query), parser_source: 'fallback_parse_error' };
   }
 }
 

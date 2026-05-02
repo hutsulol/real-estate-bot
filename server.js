@@ -151,7 +151,7 @@ app.get('/search', async (req, res) => {
 
     const aiFilters = await parseUserIntent(query);
     const filters = aiFilters || await parseQuery(query);
-    console.log("Фильтры:", filters);
+    console.log("Фильтры:", filters, "parser=", filters?.parser_source || "unknown");
 
     let dbQuery = supabase.from('apartments').select('*');
 

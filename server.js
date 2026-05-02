@@ -36,16 +36,18 @@ async function parseQuery(query) {
   "max_price": number | null,
   "deal_type": "rent" | "sale" | null,
   "source": "olx" | "rieltor" | "all" | null,
-  "floor": number | null
+  "floor": number | null,
+  "floor_min": number | null,
+  "floor_max": number | null
 }
 
 Примеры:
 
 "зняти 2к центр" →
-{"rooms":2,"district":"центр","max_price":null,"deal_type":"rent","source":"all","floor":null}
+{"rooms":2,"district":"центр","max_price":null,"deal_type":"rent","source":"all","floor":null,"floor_min":null,"floor_max":null}
 
 "купити квартиру центр" →
-{"rooms":null,"district":"центр","max_price":null,"deal_type":"sale","source":"all","floor":null}
+{"rooms":null,"district":"центр","max_price":null,"deal_type":"sale","source":"all","floor":null,"floor_min":null,"floor_max":null}
 
 Запрос:
 ${query}
@@ -165,9 +167,9 @@ app.get('/search', async (req, res) => {
       dbQuery = dbQuery.lte('price', filters.max_price);
     }
 
-    if (filters.floor) {
-      dbQuery = dbQuery.eq('floor', filters.floor);
-    }
+    if (filters.floor) dbQuery = dbQuery.eq('floor', filters.floor);
+    if (filters.floor_min) dbQuery = dbQuery.gte('floor', filters.floor_min);
+    if (filters.floor_max) dbQuery = dbQuery.lte('floor', filters.floor_max);
 
     if (filters.deal_type) {
       dbQuery = dbQuery.eq('deal_type', filters.deal_type);

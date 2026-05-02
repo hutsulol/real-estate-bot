@@ -38,13 +38,25 @@ function enrichWithHeuristic(items) {
 }
 
 function parseFloorFallback(query) {
-  const m = query.match(/(?:на|этаж|поверх|этажe|поверсі)\s*(\d{1,2})/i) || query.match(/(\d{1,2})\s*(?:этаж|поверх)/i);
-  return m ? Number(m[1]) : null;
+  const q = query.toLowerCase();
+  const between = q.match(/(?:від|от)\s*(\d{1,2}).{0,20}(?:до|по|не вище|не выше)\s*(\d{1,2})/i) || q.match(/(?:не нижче|не ниже)\s*(\d{1,2}).{0,20}(?:не вище|не выше)\s*(\d{1,2})/i);
+  if (between) {
+    const a = Number(between[1]);
+    const b = Number(between[2]);
+    return { floor: null, floor_min: Math.min(a, b), floor_max: Math.max(a, b) };
+  }
+
+  const min = q.match(/(?:вище|выше|від|от|з)\s*(\d{1,2})/i);
+  const max = q.match(/(?:до|по|не вище|не выше)\s*(\d{1,2})/i);
+  if (min || max) return { floor: null, floor_min: min ? Number(min[1]) : null, floor_max: max ? Number(max[1]) : null };
+
+  const exact = q.match(/(?:на|этаж|поверх|этажe|поверсі)\s*(\d{1,2})/i) || q.match(/(\d{1,2})\s*(?:этаж|поверх)/i);
+  return { floor: exact ? Number(exact[1]) : null, floor_min: null, floor_max: null };
 }
 
 async function parseUserIntent(query) {
-  if (!client) return { floor: parseFloorFallback(query) };
-  const prompt = `Верни JSON: {"rooms":number|null,"district":string|null,"max_price":number|null,"deal_type":"rent"|"sale"|null,"priority":"investment"|"comfort"|"balanced", "floor":number|null}. Запрос: ${query}`;
+  if (!client) return parseFloorFallback(query);
+  const prompt = `Верни JSON: {"rooms":number|null,"district":string|null,"max_price":number|null,"deal_type":"rent"|"sale"|null,"priority":"investment"|"comfort"|"balanced", "floor":number|null, "floor_min":number|null, "floor_max":number|null}. Запрос: ${query}`;
   const resp = await client.chat.completions.create({
     model: 'gpt-4o-mini',
     temperature: 0,
@@ -53,10 +65,13 @@ async function parseUserIntent(query) {
   const text = (resp.choices?.[0]?.message?.content || '').replace(/```json|```/g, '').trim();
   try {
     const parsed = JSON.parse(text);
-    if (parsed.floor == null) parsed.floor = parseFloorFallback(query);
+    const fb = parseFloorFallback(query);
+    if (parsed.floor == null) parsed.floor = fb.floor;
+    if (parsed.floor_min == null) parsed.floor_min = fb.floor_min;
+    if (parsed.floor_max == null) parsed.floor_max = fb.floor_max;
     return parsed;
   } catch {
-    return { floor: parseFloorFallback(query) };
+    return parseFloorFallback(query);
   }
 }
 

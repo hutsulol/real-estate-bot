@@ -95,8 +95,11 @@ function appendToSection(sectionName, line) {
   writeMemoryFile(newText);
 }
 
-function detectLearningInstruction(userText = '') {
+function detectLearningInstruction(userText = '', contextText = '') {
   const t = userText.trim();
+  const createFileMatch = t.match(/(?:створи|создай|create)\s+(?:нов(?:ий|у)\s+)?(?:файл)\s+(?:в\s+обсідіан[іe]?|в\s+obsidian)?\s*(?:назви|name)?\s*(.+)/i);
+  if (createFileMatch) return { type: 'new_branch', section: createFileMatch[1].trim() };
+
   const sectionMatch = t.match(/(?:створи|створимо|создай|create)\s+(?:нов(?:ий|у)\s+)?(?:розділ|секц(?:ію|ию)|гілк(?:у|а)|ветк(?:у|а)|branch)\s+(.+)/i)
     || t.match(/(?:додай|add)\s+section\s+(.+)/i);
   if (sectionMatch) return { type: 'new_branch', section: sectionMatch[1].trim() };
@@ -123,7 +126,7 @@ function detectLearningInstruction(userText = '') {
 }
 
 function handleLearningInstruction(userText = '', contextText = '') {
-  const ins = detectLearningInstruction(userText);
+  const ins = detectLearningInstruction(userText, contextText);
   if (!ins) return null;
   if (ins.type === 'noop') return "Немає що записувати: дай текст або попроси 'запам'ятай: ...'.";
 

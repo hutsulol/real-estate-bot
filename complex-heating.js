@@ -47,7 +47,25 @@ function detectComplexRequest(text='') {
 function inferListingComplexAndHeating(listing) {
   const blob = norm(`${listing.title || ''} ${listing.residential_complex || ''} ${listing.location || ''} ${listing.district || ''}`);
   const complex = COMPLEX_RULES.find((r) => r.aliases.some((a) => blob.includes(norm(a))));
-  return { complex: complex?.name || null, heating: complex?.heating || null };
+
+  // Пріоритет: пряме поле heating_system з бази, якщо заповнене
+  let heating = complex?.heating || null;
+  if (listing.heating_system) {
+    const hs = norm(listing.heating_system);
+    // Точний збіг з назвою типу
+    if (HEATING_KEYWORDS[listing.heating_system]) {
+      heating = listing.heating_system;
+    } else {
+      for (const [type, kws] of Object.entries(HEATING_KEYWORDS)) {
+        if (norm(type) === hs || kws.some((k) => hs.includes(norm(k)))) {
+          heating = type;
+          break;
+        }
+      }
+    }
+  }
+
+  return { complex: complex?.name || null, heating };
 }
 
 module.exports = { COMPLEX_RULES, HEATING_KEYWORDS, detectHeatingRequest, detectComplexRequest, inferListingComplexAndHeating };

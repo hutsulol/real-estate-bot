@@ -5,6 +5,7 @@ const cors = require('cors');
 const OpenAI = require('openai');
 const { createClient } = require('@supabase/supabase-js');
 const { enrichWithHeuristic, parseUserIntent } = require('./value-agent');
+const { detectHeatingRequest, detectComplexRequest, inferListingComplexAndHeating } = require('./complex-heating');
 
 const app = express();
 app.use(cors());
@@ -194,6 +195,18 @@ app.get('/search', async (req, res) => {
     // AI-ранжирование + выгодность
     clean = enrichWithHeuristic(clean);
     clean = addDealScore(clean);
+
+    // Фільтр по опаленню та ЖК
+    const requestedHeating = detectHeatingRequest(query);
+    const requestedComplex = detectComplexRequest(query);
+    if (requestedHeating || requestedComplex) {
+      clean = clean.filter((x) => {
+        const inferred = inferListingComplexAndHeating(x);
+        if (requestedComplex && inferred.complex !== requestedComplex.name) return false;
+        if (requestedHeating && inferred.heating !== requestedHeating) return false;
+        return true;
+      });
+    }
 
     const wantsMixedSources = /(всіх джерел|всех источников|переміш|впереміш|mix|mixed)/i.test(query);
     const finalList = wantsMixedSources ? mixSources(clean, 20) : clean.slice(0, 20);

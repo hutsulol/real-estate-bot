@@ -98,6 +98,24 @@ async function findListingsByIntent(text) {
       if (requestedHeating && inferred.heating !== requestedHeating) return false;
       return true;
     });
+    if (!selected.length) {
+      const filterDesc = [
+        requestedComplex ? `ЖК: ${requestedComplex.name}` : null,
+        requestedHeating ? `опалення: ${requestedHeating}` : null,
+      ].filter(Boolean).join(', ');
+      return {
+        text: `У базі не знайдено квартир з фільтром: ${filterDesc}.\nМожливо, оголошення ще не додані або тип опалення не розпізнано в описах.`,
+        emptyFilter: true,
+        lunFound: false,
+        olxFound: false,
+        sourceHint,
+        requestedCount,
+        intent,
+        listMode,
+        requestedHeating,
+        requestedComplex: requestedComplex?.name || null,
+      };
+    }
   }
 
   selected = (listMode === 'worst' ? [...selected].reverse() : selected).slice(0, requestedCount);
@@ -125,13 +143,18 @@ function isBranchListQuery(text) {
 
 function shouldReturnListings(text) {
   const t = String(text || '').toLowerCase();
-  const explicitListIntent = /(покажи|підбери|подбери|знайди|find|search|дай\s+\d+)/i.test(t)
+  const explicitListIntent = /(покажи|підбери|подбери|знайди|find|search|дай)/i.test(t)
     && /(варіант|вариант|оголош|объявл|квартир|listing|пропозиц)/i.test(t);
 
   const reflectiveIntent = /(поясни|обґрунтуй|обоснуй|чому|почему|напиши|розпиши|стратег|фактор|ризик|конкуренц|ліквідн|окупн)/i.test(t);
   if (reflectiveIntent && !explicitListIntent) return false;
 
-  return explicitListIntent;
+  if (explicitListIntent) return true;
+
+  // Короткий запит тільки з типом опалення (фільтр-уточнення)
+  const heatingOnly = detectHeatingRequest(t) !== null && t.trim().length <= 60
+    && !/(розкажи|поясни|що таке|опиши|як працює)/i.test(t);
+  return heatingOnly;
 }
 
 async function answer(text, chatId = 'default') {
@@ -159,6 +182,11 @@ async function answer(text, chatId = 'default') {
   if (askForListings) {
     const result = await findListingsByIntent(text);
     if (result) {
+      if (result.emptyFilter) {
+        appendMemory({ userText: text, replyText: result.text, intent: result.intent, listMode: 'filter_empty' });
+        lastAssistantReplyByChat.set(String(chatId), result.text);
+        return result.text;
+      }
       let prefix = result.listMode === 'worst'
         ? 'Ось найгірші (найменш вигідні) варіанти з вашої бази:'
         : 'Ось найкращі варіанти з вашої бази (без пріоритету джерела):';

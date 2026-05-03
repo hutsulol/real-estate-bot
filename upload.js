@@ -2,32 +2,41 @@ require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 const fs = require('fs');
 
-const supabase = createClient(
-    'https://ixxvfvtdomhenwqhpyqj.supabase.co',
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml4eHZmdnRkb21oZW53cWhweXFqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3MTU5NDQsImV4cCI6MjA5MzI5MTk0NH0.vN_PmGqaLsffZLRkFgFRckQhTGoIQnW22u_o12Bpuho'
-);
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+const SUPABASE_TABLE = process.env.SUPABASE_TABLE || 'apartments';
+const INPUT_FILE = process.env.OUTPUT_DATA_FILE || 'final-data.json';
 
-const data = JSON.parse(fs.readFileSync('final-data.json', 'utf-8'));
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+  throw new Error('Set SUPABASE_URL and SUPABASE_ANON_KEY in .env');
+}
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const data = JSON.parse(fs.readFileSync(INPUT_FILE, 'utf-8'));
 
 (async () => {
-  console.log('Загружаем в базу...');
+  console.log(`Загружаем ${data.length} записей в ${SUPABASE_TABLE}...`);
 
-  for (let item of data) {
-    const { error } = await supabase.from('apartments').insert({
+  for (const item of data) {
+    const { error } = await supabase.from(SUPABASE_TABLE).insert({
       id: item.id,
       title: item.title,
       price: item.price,
       currency: item.currency,
-      rooms: item.rooms,
-      district: item.district,
-      residential_complex: item.residential_complex,
-      street: item.street,
-      link: item.link,
-      deal_type: item.deal_type // 🔥 ВАЖНО
+      rooms: item.rooms ?? item.room_count ?? null,
+      district: item.district ?? null,
+      residential_complex: item.residential_complex ?? null,
+      street: item.street ?? null,
+      floor: item.floor ?? null,
+      floor_count: item.floor_count ?? null,
+      area_total: item.area_total ?? null,
+      link: item.link ?? item.source_url ?? null,
+      deal_type: item.deal_type ?? null,
+      source: item.source ?? null,
     });
 
     if (error) {
-      console.log(error);
+      console.log('Insert error:', error.message);
     }
   }
 

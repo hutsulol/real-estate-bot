@@ -2,7 +2,7 @@ require('dotenv').config();
 const OpenAI = require('openai');
 const { createClient } = require('@supabase/supabase-js');
 const { parseUserIntent, enrichWithHeuristic } = require('./value-agent');
-const { appendMemory, getRecentMemory, vaultRoot, handleLearningInstruction, listBranches, getActiveBranchName } = require('./obsidian-memory');
+const { appendMemory, getRecentMemory, vaultRoot, handleLearningInstruction, listBranches, getActiveBranchName, searchVaultForJK, readVaultNote, getHeatingNoteFromVault } = require('./obsidian-memory');
 const { detectHeatingRequest, detectComplexRequest, inferListingComplexAndHeating } = require('./complex-heating');
 
 const TELEGRAM_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '')
@@ -208,7 +208,44 @@ async function answer(text, chatId = 'default') {
 - Якщо доречно, дай 1-3 конкретні критерії оцінки вигоди (ціна за м², район, ЖК, ліквідність).
 - Не повторюй попередню відповідь майже дослівно.
 - Якщо користувач просить список з бази, а даних немає, прямо скажи що у базі не знайдено.
-- Якщо користувач просить аналітику/фактори/стратегію, НЕ повертай список оголошень, дай міркування та критерії рішення.`;
+- Якщо користувач просить аналітику/фактори/стратегію, НЕ повертай список оголошень, дай міркування та критерії рішення.
+- Якщо в контексті є дані з Obsidian-нотаток — використовуй їх як достовірне першоджерело.`;
+
+  // Збираємо контекст з Obsidian vault
+  const vaultContextParts = [];
+
+  // 1. Якщо питання про конкретний ЖК — шукаємо в vault
+  const complexMatch = detectComplexRequest(text);
+  if (complexMatch) {
+    const hits = searchVaultForJK(complexMatch.name.replace('ЖК ', ''));
+    if (hits.length) {
+      vaultContextParts.push(`Дані з Obsidian про ${complexMatch.name}:\n${hits.map((h) => h.excerpt).join('\n---\n')}`);
+    }
+  }
+
+  // 2. Якщо явно просять інфу з обсідіану — читаємо heating-файл або шукаємо по тексту
+  const wantsObsidian = /(обсідіан|obsidian|нотатк|з\s+бази\s+знань|яку\s+я\s+задав)/i.test(text);
+  if (wantsObsidian && !vaultContextParts.length) {
+    const heatingNote = getHeatingNoteFromVault();
+    if (heatingNote) {
+      vaultContextParts.push(`Файл Obsidian «${heatingNote.file}»:\n${heatingNote.content.slice(0, 3000)}`);
+    } else {
+      // шукаємо по будь-яким ключовим словам з тексту
+      const words = text.replace(/[^а-яіїєґa-z0-9\s]/gi, ' ').split(/\s+/).filter((w) => w.length > 3);
+      for (const w of words.slice(0, 3)) {
+        const hits = searchVaultForJK(w);
+        if (hits.length) { vaultContextParts.push(hits.map((h) => `[${h.file}]\n${h.excerpt}`).join('\n')); break; }
+      }
+    }
+  }
+
+  // 3. Питання про опалення взагалі — підкидаємо heating-нотатку
+  const heatingInQuery = /(опаленн|котельн|котел|heating)/i.test(text);
+  if (heatingInQuery && !vaultContextParts.length) {
+    const heatingNote = getHeatingNoteFromVault();
+    if (heatingNote) vaultContextParts.push(`Файл Obsidian «${heatingNote.file}»:\n${heatingNote.content.slice(0, 3000)}`);
+  }
+
   const memory = getRecentMemory(4);
   const r = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
@@ -216,6 +253,7 @@ async function answer(text, chatId = 'default') {
     messages: [
       { role: 'system', content: system },
       ...(memory ? [{ role: 'system', content: `Пам'ять агента (Obsidian нотатки, стисло):\n${memory}` }] : []),
+      ...(vaultContextParts.length ? [{ role: 'system', content: `Контекст з Obsidian vault:\n${vaultContextParts.join('\n\n')}` }] : []),
       { role: 'user', content: text }
     ]
   });

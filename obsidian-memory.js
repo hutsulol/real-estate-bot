@@ -158,4 +158,82 @@ function getRecentMemory(limit = 12) {
   }
 }
 
-module.exports = { appendMemory, getRecentMemory, vaultRoot, memoryDir, handleLearningInstruction, ensureSection, listBranches, getActiveBranchName };
+// ─── Vault-wide search (читає всі .md файли у vault, не тільки agent-memory) ───
+
+function listAllVaultFiles(dir = vaultRoot, found = []) {
+  try {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules') {
+        listAllVaultFiles(full, found);
+      } else if (entry.isFile() && entry.name.endsWith('.md')) {
+        found.push(full);
+      }
+    }
+  } catch { /* vault недоступний */ }
+  return found;
+}
+
+/**
+ * Шукає в усіх .md файлах vault секцію або абзац, що згадує jkQuery.
+ * Повертає масив { file, excerpt } — перші 3 збіги.
+ */
+function searchVaultForJK(jkQuery = '') {
+  if (!jkQuery) return [];
+  const q = jkQuery.toLowerCase();
+  const results = [];
+  for (const filePath of listAllVaultFiles()) {
+    try {
+      const raw = fs.readFileSync(filePath, 'utf8');
+      if (!raw.toLowerCase().includes(q)) continue;
+      // Витягуємо абзаци/рядки навколо збігу
+      const lines = raw.split('\n');
+      const matchLines = [];
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].toLowerCase().includes(q)) {
+          // беремо заголовок секції вище + 3 рядки контексту
+          const from = Math.max(0, i - 1);
+          const to = Math.min(lines.length - 1, i + 3);
+          matchLines.push(lines.slice(from, to + 1).join('\n'));
+        }
+      }
+      results.push({ file: path.relative(vaultRoot, filePath), excerpt: matchLines.join('\n---\n') });
+      if (results.length >= 3) break;
+    } catch { /* skip */ }
+  }
+  return results;
+}
+
+/**
+ * Читає весь вміст файлу vault за частковим ім'ям або повним шляхом.
+ * Напр. readVaultNote('його-опалення-в-жк') знайде будь-який файл що містить це в назві.
+ */
+function readVaultNote(nameFragment = '') {
+  const frag = nameFragment.toLowerCase().replace(/\.md$/, '');
+  for (const filePath of listAllVaultFiles()) {
+    if (path.basename(filePath).toLowerCase().replace(/\.md$/, '').includes(frag)) {
+      try { return { file: path.relative(vaultRoot, filePath), content: fs.readFileSync(filePath, 'utf8') }; } catch { return null; }
+    }
+  }
+  return null;
+}
+
+/**
+ * Знаходить файл з інфою про опалення ЖК (пошук по ключовим словам у назві файлу).
+ */
+function getHeatingNoteFromVault() {
+  const keywords = ['опаленн', 'heating', 'жк-', '-жк', 'complexes', 'комплекс'];
+  for (const filePath of listAllVaultFiles()) {
+    const base = path.basename(filePath).toLowerCase();
+    if (keywords.some((k) => base.includes(k))) {
+      try { return { file: path.relative(vaultRoot, filePath), content: fs.readFileSync(filePath, 'utf8') }; } catch { return null; }
+    }
+  }
+  return null;
+}
+
+module.exports = {
+  appendMemory, getRecentMemory, vaultRoot, memoryDir,
+  handleLearningInstruction, ensureSection, listBranches, getActiveBranchName,
+  searchVaultForJK, readVaultNote, getHeatingNoteFromVault, listAllVaultFiles,
+};

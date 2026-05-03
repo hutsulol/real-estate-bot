@@ -75,16 +75,16 @@ async function findListingsByIntent(text, overrideHeating = undefined, overrideC
     query = query.or(orParts.join(','));
   }
 
-  // ── Фільтр опалення на рівні Supabase (heating_system + aliases всіх ЖК з таким типом) ──
+  // ── Фільтр опалення на рівні Supabase (heating_system + residential_complex aliases) ──
+  // Не використовуємо title — надто широко і дає false positives
   if (requestedHeating && !requestedComplex) {
     const heatingComplexes = COMPLEX_RULES.filter((r) => r.heating === requestedHeating);
-    const complexAliases = heatingComplexes.flatMap((c) => c.aliases).slice(0, 12);
+    const complexAliases = heatingComplexes.flatMap((c) => c.aliases).slice(0, 15);
     const heatingKws = (HEATING_KEYWORDS[requestedHeating] || []).slice(0, 4);
     const orParts = [
       ...heatingKws.map((k) => `heating_system.ilike.%${k}%`),
       ...complexAliases.map((a) => `residential_complex.ilike.%${a}%`),
-      ...complexAliases.slice(0, 6).map((a) => `title.ilike.%${a}%`),
-      ...complexAliases.slice(0, 4).map((a) => `location.ilike.%${a}%`),
+      ...complexAliases.slice(0, 6).map((a) => `location.ilike.%${a}%`),
     ];
     if (orParts.length) query = query.or(orParts.join(','));
   }
@@ -199,19 +199,16 @@ async function answer(text, chatId = 'default') {
     return reply;
   }
 
-  // ── Follow-up до попереднього лістинг-запиту ("а з яким є?", "взагалі нема квартир?") ──
+  // ── Follow-up до попереднього лістинг-запиту ("а з яким є?", "а взагалі є?") ──
   if (isFollowUpQuery(text)) {
-    const prevCtx = lastListingContextByChat.get(String(chatId));
-    if (prevCtx) {
-      // Повторний запит без фільтру що не дав результату
-      const result = await findListingsByIntent(text, null, null);
-      if (result && !result.emptyFilter) {
-        const responseText = `Ось що є в базі без фільтру:\n\n${result.text}`;
-        appendMemory({ userText: text, replyText: responseText, intent: result.intent, listMode: 'followup' });
-        lastAssistantReplyByChat.set(String(chatId), responseText);
-        lastListingContextByChat.delete(String(chatId));
-        return responseText;
-      }
+    // Запускаємо без фільтру незалежно від того чи є збережений контекст
+    const result = await findListingsByIntent(text, null, null);
+    if (result && !result.emptyFilter) {
+      const responseText = `Ось що є в базі (без фільтру):\n\n${result.text}`;
+      appendMemory({ userText: text, replyText: responseText, intent: result.intent, listMode: 'followup' });
+      lastAssistantReplyByChat.set(String(chatId), responseText);
+      lastListingContextByChat.delete(String(chatId));
+      return responseText;
     }
   }
 

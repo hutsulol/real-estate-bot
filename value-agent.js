@@ -37,6 +37,21 @@ function enrichWithHeuristic(items) {
     .sort((a, b) => b.value_score - a.value_score || a.price - b.price);
 }
 
+function parseRoomsFallback(query) {
+  const q = String(query || '').toLowerCase();
+  // "1 кімнатні", "2-кімнатна", "3 комнатная"
+  const numKimnat = q.match(/(\d+)\s*[-–]?\s*кімнат/i) || q.match(/(\d+)\s*[-–]?\s*комнат/i);
+  if (numKimnat) return Number(numKimnat[1]);
+  // "1к", "2к", "3к" як окреме слово (без \b — кирилиця ламає word boundary)
+  const shortForm = q.match(/(?:^|[\s,;(])(\d)к(?:[\s,;).]|$)/i);
+  if (shortForm) return Number(shortForm[1]);
+  if (/однокімнат|одно[\s-]кімнат/i.test(q)) return 1;
+  if (/двохкімнат|дво[\s-]кімнат/i.test(q)) return 2;
+  if (/трьохкімнат|три[\s-]кімнат/i.test(q)) return 3;
+  if (/чотирикімнат|чотири[\s-]кімнат/i.test(q)) return 4;
+  return null;
+}
+
 function parseFloorFallback(query) {
   const q = query.toLowerCase();
   const between = q.match(/(?:від|от)\s*(\d{1,2}).{0,20}(?:до|по|не вище|не выше)\s*(\d{1,2})/i) || q.match(/(?:не нижче|не ниже)\s*(\d{1,2}).{0,20}(?:не вище|не выше)\s*(\d{1,2})/i);
@@ -77,10 +92,11 @@ async function parseUserIntent(query) {
       parsed.floor_max = fb.floor_max ?? parsed.floor_max;
     }
 
+    if (parsed.rooms == null) parsed.rooms = parseRoomsFallback(query);
     parsed.parser_source = 'openai';
     return parsed;
   } catch {
-    return { ...parseFloorFallback(query), parser_source: 'fallback_parse_error' };
+    return { ...parseFloorFallback(query), rooms: parseRoomsFallback(query), parser_source: 'fallback_parse_error' };
   }
 }
 

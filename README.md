@@ -77,3 +77,6 @@ notepad .\clean-data.js
 - `district/street/location` -> `location`
 - `floor_count` -> `floors_total`
 - `deal_type` не відправляється (бо колонки немає у вашій схемі)
+
+
+Детальний список полів і SQL: `docs/supabase-fields.md`.

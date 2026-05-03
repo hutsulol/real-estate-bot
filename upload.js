@@ -2,13 +2,13 @@ require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 const fs = require('fs');
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.SUPABASE_PROJECT_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
 const SUPABASE_TABLE = process.env.SUPABASE_TABLE || 'apartments';
 const INPUT_FILE = process.env.OUTPUT_DATA_FILE || 'final-data.json';
 
 if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-  throw new Error('Set SUPABASE_URL and SUPABASE_ANON_KEY in .env');
+  throw new Error('Missing Supabase env. Add SUPABASE_URL + SUPABASE_ANON_KEY (or SUPABASE_PROJECT_URL + SUPABASE_KEY) to .env');
 }
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);

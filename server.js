@@ -4,6 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const OpenAI = require('openai');
 const { createClient } = require('@supabase/supabase-js');
+const { enrichWithHeuristic, parseUserIntent } = require('./value-agent');
 
 const app = express();
 app.use(cors());
@@ -33,16 +34,20 @@ async function parseQuery(query) {
   "rooms": number | null,
   "district": string | null,
   "max_price": number | null,
-  "deal_type": "rent" | "sale" | null
+  "deal_type": "rent" | "sale" | null,
+  "source": "olx" | "rieltor" | "all" | null,
+  "floor": number | null,
+  "floor_min": number | null,
+  "floor_max": number | null
 }
 
 Примеры:
 
 "зняти 2к центр" →
-{"rooms":2,"district":"центр","max_price":null,"deal_type":"rent"}
+{"rooms":2,"district":"центр","max_price":null,"deal_type":"rent","source":"all","floor":null,"floor_min":null,"floor_max":null}
 
 "купити квартиру центр" →
-{"rooms":null,"district":"центр","max_price":null,"deal_type":"sale"}
+{"rooms":null,"district":"центр","max_price":null,"deal_type":"sale","source":"all","floor":null,"floor_min":null,"floor_max":null}
 
 Запрос:
 ${query}
@@ -110,19 +115,43 @@ function addDealScore(list) {
   });
 }
 
+
+function detectSource(item) {
+  if (item.source) return item.source;
+  const link = item.link || '';
+  if (link.includes('olx.ua')) return 'olx';
+  if (link.includes('rieltor.ua')) return 'rieltor';
+  return 'unknown';
+}
+
+function mixSources(list, maxItems = 20) {
+  const olx = list.filter((x) => (x.link || '').includes('olx.ua'));
+  const other = list.filter((x) => !(x.link || '').includes('olx.ua'));
+  const mixed = [];
+
+  while ((olx.length || other.length) && mixed.length < maxItems) {
+    if (other.length) mixed.push(other.shift());
+    if (olx.length && mixed.length < maxItems) mixed.push(olx.shift());
+  }
+
+  return mixed.length ? mixed : list.slice(0, maxItems);
+}
+
 // =======================
 // 🔍 Поиск
 // =======================
 app.get('/search', async (req, res) => {
   try {
     const query = req.query.q;
+    const sourceParam = req.query.source;
 
     if (!query) {
       return res.json([]);
     }
 
-    const filters = await parseQuery(query);
-    console.log("Фильтры:", filters);
+    const aiFilters = await parseUserIntent(query);
+    const filters = aiFilters || await parseQuery(query);
+    console.log("Фильтры:", filters, "parser=", filters?.parser_source || "unknown");
 
     let dbQuery = supabase.from('apartments').select('*');
 
@@ -138,11 +167,21 @@ app.get('/search', async (req, res) => {
       dbQuery = dbQuery.lte('price', filters.max_price);
     }
 
+    if (filters.floor) dbQuery = dbQuery.eq('floor', filters.floor);
+    if (filters.floor_min) dbQuery = dbQuery.gte('floor', filters.floor_min);
+    if (filters.floor_max) dbQuery = dbQuery.lte('floor', filters.floor_max);
+
     if (filters.deal_type) {
-  dbQuery = dbQuery.eq('deal_type', filters.deal_type);
-    }    
-    
-    const { data, error } = await dbQuery.limit(50);
+      dbQuery = dbQuery.eq('deal_type', filters.deal_type);
+    }
+
+    const effectiveSource = sourceParam || filters.source;
+    if (effectiveSource && effectiveSource !== 'all') {
+      if (effectiveSource === 'olx') dbQuery = dbQuery.ilike('link', '%olx.ua%');
+      if (effectiveSource === 'rieltor' || effectiveSource === 'rieltor.ua') dbQuery = dbQuery.ilike('link', '%rieltor.ua%');
+    }
+
+    const { data, error } = await dbQuery.limit(300);
 
     if (error) {
       console.log("❌ Supabase error:", error);
@@ -152,17 +191,24 @@ app.get('/search', async (req, res) => {
     // 🔥 удаляем дубликаты
     let clean = deduplicate(data);
 
-    // 🔥 считаем выгодность
+    // AI-ранжирование + выгодность
+    clean = enrichWithHeuristic(clean);
     clean = addDealScore(clean);
 
-    // 🔥 сортируем
-    clean.sort((a, b) => {
-      if (a.deal === '🔥 выгодно') return -1;
-      if (b.deal === '🔥 выгодно') return 1;
-      return a.price - b.price;
-    });
+    const wantsMixedSources = /(всіх джерел|всех источников|переміш|впереміш|mix|mixed)/i.test(query);
+    const finalList = wantsMixedSources ? mixSources(clean, 20) : clean.slice(0, 20);
 
-    res.json(clean.slice(0, 20));
+    res.json(finalList.map((x) => ({
+      ...x,
+      source: detectSource(x),
+      details: {
+        floor: x.floor ?? null,
+        floor_count: x.floor_count ?? null,
+        wall_type: x.wall_type ?? null,
+        heating_system: x.heating_system ?? null,
+        support_programs: x.support_programs ?? null,
+      }
+    })));
 
   } catch (err) {
     console.log("❌ Server error:", err);

@@ -5,7 +5,14 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "recon:lun": "node recon-lun.js"
+    "recon:lun": "node recon-lun.js",
+    "parse:lun": "node lun-parser.js",
+    "sync:lun": "node lun-sync.js",
+    "sync:lun:watch": "node lun-sync.js --watch",
+    "bot:telegram": "node telegram-bot.js",
+    "enrich:rieltor": "node rieltor-enrich.js",
+    "enrich:rieltor:all": "powershell -ExecutionPolicy Bypass -File ./enrich-rieltor-all.ps1",
+    "memory:show": "f=$(cat memory-vault/agent-memory/.active-memory.txt 2>/dev/null || echo real-estate-agent-memory.md); tail -n 120 memory-vault/agent-memory/$f"
   },
   "keywords": [],
   "author": "",

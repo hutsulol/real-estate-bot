@@ -3,7 +3,7 @@ const OpenAI = require('openai');
 const { createClient } = require('@supabase/supabase-js');
 const { parseUserIntent, enrichWithHeuristic } = require('./value-agent');
 const { appendMemory, getRecentMemory, vaultRoot, handleLearningInstruction, listBranches, getActiveBranchName, searchVaultForJK, readVaultNote, getHeatingNoteFromVault } = require('./obsidian-memory');
-const { detectHeatingRequest, detectComplexRequest, inferListingComplexAndHeating } = require('./complex-heating');
+const { detectHeatingRequest, detectComplexRequest, inferListingComplexAndHeating, COMPLEX_RULES, HEATING_KEYWORDS } = require('./complex-heating');
 
 const TELEGRAM_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '')
   .trim()
@@ -42,17 +42,18 @@ function detectListMode(text, intent = {}) {
   return 'best';
 }
 
-async function findListingsByIntent(text) {
+async function findListingsByIntent(text, overrideHeating = undefined, overrideComplex = undefined) {
   const intent = (await parseUserIntent(text)) || {};
   const listMode = detectListMode(text, intent);
   const requestedCount = extractRequestedCount(text);
-  const requestedHeating = detectHeatingRequest(text);
-  const requestedComplex = detectComplexRequest(text);
+  const requestedHeating = overrideHeating !== undefined ? overrideHeating : detectHeatingRequest(text);
+  const requestedComplex = overrideComplex !== undefined ? overrideComplex : detectComplexRequest(text);
   const withoutOlx = /(без\s+олх|без\s+olx|exclude\s+olx)/i.test(text);
   const hasOlxHint = /(\bolx\b|олх)/i.test(text) && !withoutOlx;
   const hasLunHint = /(\blun\b|лун|ріелтор|rieltor)/i.test(text);
-  const mixedHint = /(всіх джерел|всех источников|переміш|впереміш|mix|mixed)/i.test(text);
+  const mixedHint = /(всіх джерел|всех источників|переміш|впереміш|mix|mixed)/i.test(text);
   const sourceHint = withoutOlx ? 'lun' : (mixedHint ? 'both' : (hasOlxHint && hasLunHint ? 'both' : (hasOlxHint ? 'olx' : (hasLunHint ? 'lun' : null))));
+
   let query = supabase.from('apartments').select('*').limit(250);
 
   if (intent.rooms) query = query.eq('rooms', intent.rooms);
@@ -64,8 +65,48 @@ async function findListingsByIntent(text) {
   const dealType = intent.deal_type || 'sale';
   query = query.eq('deal_type', dealType);
 
+  // ── Фільтр ЖК на рівні Supabase (по aliases у title/residential_complex/location) ──
+  if (requestedComplex) {
+    const orParts = requestedComplex.aliases.slice(0, 8).flatMap((a) => [
+      `residential_complex.ilike.%${a}%`,
+      `title.ilike.%${a}%`,
+      `location.ilike.%${a}%`,
+    ]);
+    query = query.or(orParts.join(','));
+  }
+
+  // ── Фільтр опалення на рівні Supabase (heating_system + aliases всіх ЖК з таким типом) ──
+  if (requestedHeating && !requestedComplex) {
+    const heatingComplexes = COMPLEX_RULES.filter((r) => r.heating === requestedHeating);
+    const complexAliases = heatingComplexes.flatMap((c) => c.aliases).slice(0, 12);
+    const heatingKws = (HEATING_KEYWORDS[requestedHeating] || []).slice(0, 4);
+    const orParts = [
+      ...heatingKws.map((k) => `heating_system.ilike.%${k}%`),
+      ...complexAliases.map((a) => `residential_complex.ilike.%${a}%`),
+      ...complexAliases.slice(0, 6).map((a) => `title.ilike.%${a}%`),
+      ...complexAliases.slice(0, 4).map((a) => `location.ilike.%${a}%`),
+    ];
+    if (orParts.length) query = query.or(orParts.join(','));
+  }
+
   const { data, error } = await query;
-  if (error || !data?.length) return null;
+  if (error) { console.error('Supabase error:', error.message); return null; }
+
+  if (!data?.length) {
+    if (requestedComplex || requestedHeating) {
+      const filterDesc = [
+        requestedComplex ? `ЖК: ${requestedComplex.name}` : null,
+        requestedHeating ? `опалення: ${requestedHeating}` : null,
+      ].filter(Boolean).join(', ');
+      return {
+        text: `У базі не знайдено оголошень з фільтром: ${filterDesc}.\nМожливо, квартири ще не додані або оголошення з таким описом відсутні.`,
+        emptyFilter: true, lunFound: false, olxFound: false, sourceHint,
+        requestedCount, intent, listMode, requestedHeating,
+        requestedComplex: requestedComplex?.name || null,
+      };
+    }
+    return null;
+  }
 
   const ranked = enrichWithHeuristic(data);
   const onlyOlx = ranked.filter((x) => (x.link || '').includes('olx.ua'));
@@ -77,8 +118,7 @@ async function findListingsByIntent(text) {
   else if (sourceHint === 'lun') selected = nonOlx.length ? nonOlx : ranked;
   else if (sourceHint === 'both') {
     const mixed = [];
-    const a = [...nonOlx];
-    const b = [...onlyOlx];
+    const a = [...nonOlx]; const b = [...onlyOlx];
     while (a.length || b.length) {
       if (a.length) mixed.push(a.shift());
       if (b.length) mixed.push(b.shift());
@@ -86,65 +126,46 @@ async function findListingsByIntent(text) {
     }
     selected = mixed.length ? mixed : ranked;
   }
-
   if (needVerifiedFloor && sourceHint !== 'olx') {
     selected = selected.filter((x) => x.floor !== null && x.floor !== undefined);
-  }
-
-  if (requestedComplex || requestedHeating) {
-    selected = selected.filter((x) => {
-      const inferred = inferListingComplexAndHeating(x);
-      if (requestedComplex && inferred.complex !== requestedComplex.name) return false;
-      if (requestedHeating && inferred.heating !== requestedHeating) return false;
-      return true;
-    });
-    if (!selected.length) {
-      const filterDesc = [
-        requestedComplex ? `ЖК: ${requestedComplex.name}` : null,
-        requestedHeating ? `опалення: ${requestedHeating}` : null,
-      ].filter(Boolean).join(', ');
-      return {
-        text: `У базі не знайдено квартир з фільтром: ${filterDesc}.\nМожливо, оголошення ще не додані або тип опалення не розпізнано в описах.`,
-        emptyFilter: true,
-        lunFound: false,
-        olxFound: false,
-        sourceHint,
-        requestedCount,
-        intent,
-        listMode,
-        requestedHeating,
-        requestedComplex: requestedComplex?.name || null,
-      };
-    }
   }
 
   selected = (listMode === 'worst' ? [...selected].reverse() : selected).slice(0, requestedCount);
 
   return {
-    text: selected.map((x, i) => `${i + 1}) ${x.title || 'Квартира'} | ${x.price} ${x.currency || ''} | ${x.rooms || '?'}к | ${(inferListingComplexAndHeating(x).complex || x.district || 'район не вказано')} | опалення: ${inferListingComplexAndHeating(x).heating || 'не вказано'}\n${x.link || ''}`).join('\n\n'),
+    text: selected.map((x, i) => {
+      const inferred = inferListingComplexAndHeating(x);
+      const displayComplex = inferred.complex || requestedComplex?.name || x.district || 'район не вказано';
+      const displayHeating = inferred.heating || requestedHeating || 'не вказано';
+      return `${i + 1}) ${x.title || 'Квартира'} | ${x.price} ${x.currency || ''} | ${x.rooms || '?'}к | ${displayComplex} | опалення: ${displayHeating}\n${x.link || ''}`;
+    }).join('\n\n'),
     lunFound: nonOlx.length > 0,
     olxFound: onlyOlx.length > 0,
-    sourceHint,
-    requestedCount,
-    intent,
-    listMode,
-    requestedHeating,
-    requestedComplex: requestedComplex?.name || null
+    sourceHint, requestedCount, intent, listMode, requestedHeating,
+    requestedComplex: requestedComplex?.name || null,
   };
 }
 
 
 const lastAssistantReplyByChat = new Map();
+// Зберігає останній контекст фільтру (ЖК/опалення) для follow-up запитів
+const lastListingContextByChat = new Map();
 
 function isBranchListQuery(text) {
   return /(які\s+.*гілк|какие\s+.*ветк|list\s+branches|show\s+branches)/i.test(String(text || ''));
 }
 
+// Чи це follow-up до попереднього запиту ("а з яким є?", "покажи більше", "а без фільтру")
+function isFollowUpQuery(text) {
+  return /(^а\s|^і\s|^ну\s|а\s+з\s+яким|а\s+що\s+є|які\s+є|є\s+щось|без\s+фільтру|показ(ати|уй)\s+більше|всі\s+варіанти|взагалі\s+нема|нема\s+нічого|без\s+opалення|нема\s+квартир)/i.test(String(text || '').trim());
+}
 
 function shouldReturnListings(text) {
   const t = String(text || '').toLowerCase();
-  const explicitListIntent = /(покажи|підбери|подбери|знайди|find|search|дай)/i.test(t)
-    && /(варіант|вариант|оголош|объявл|квартир|listing|пропозиц)/i.test(t);
+
+  const explicitListIntent =
+    /(покажи|підбери|подбери|знайди|find|search|дай|виведи|вивести|відобрази|список|вибери)/i.test(t)
+    && /(варіант|вариант|оголош|объявл|квартир|listing|пропозиц|все|всі|всіх)/i.test(t);
 
   const reflectiveIntent = /(поясни|обґрунтуй|обоснуй|чому|почему|напиши|розпиши|стратег|фактор|ризик|конкуренц|ліквідн|окупн)/i.test(t);
   if (reflectiveIntent && !explicitListIntent) return false;
@@ -178,15 +199,34 @@ async function answer(text, chatId = 'default') {
     return reply;
   }
 
+  // ── Follow-up до попереднього лістинг-запиту ("а з яким є?", "взагалі нема квартир?") ──
+  if (isFollowUpQuery(text)) {
+    const prevCtx = lastListingContextByChat.get(String(chatId));
+    if (prevCtx) {
+      // Повторний запит без фільтру що не дав результату
+      const result = await findListingsByIntent(text, null, null);
+      if (result && !result.emptyFilter) {
+        const responseText = `Ось що є в базі без фільтру:\n\n${result.text}`;
+        appendMemory({ userText: text, replyText: responseText, intent: result.intent, listMode: 'followup' });
+        lastAssistantReplyByChat.set(String(chatId), responseText);
+        lastListingContextByChat.delete(String(chatId));
+        return responseText;
+      }
+    }
+  }
+
   const askForListings = shouldReturnListings(text);
   if (askForListings) {
     const result = await findListingsByIntent(text);
     if (result) {
       if (result.emptyFilter) {
+        // Зберігаємо контекст для можливого follow-up
+        lastListingContextByChat.set(String(chatId), { heating: result.requestedHeating, complex: result.requestedComplex });
         appendMemory({ userText: text, replyText: result.text, intent: result.intent, listMode: 'filter_empty' });
         lastAssistantReplyByChat.set(String(chatId), result.text);
         return result.text;
       }
+      lastListingContextByChat.delete(String(chatId));
       let prefix = result.listMode === 'worst'
         ? 'Ось найгірші (найменш вигідні) варіанти з вашої бази:'
         : 'Ось найкращі варіанти з вашої бази (без пріоритету джерела):';

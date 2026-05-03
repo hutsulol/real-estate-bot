@@ -3,6 +3,7 @@ const OpenAI = require('openai');
 const { createClient } = require('@supabase/supabase-js');
 const { parseUserIntent, enrichWithHeuristic } = require('./value-agent');
 const { appendMemory, getRecentMemory, vaultRoot, handleLearningInstruction, listBranches, getActiveBranchName } = require('./obsidian-memory');
+const { detectHeatingRequest, detectComplexRequest, inferListingComplexAndHeating } = require('./complex-heating');
 
 const TELEGRAM_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '')
   .trim()
@@ -45,6 +46,8 @@ async function findListingsByIntent(text) {
   const intent = (await parseUserIntent(text)) || {};
   const listMode = detectListMode(text, intent);
   const requestedCount = extractRequestedCount(text);
+  const requestedHeating = detectHeatingRequest(text);
+  const requestedComplex = detectComplexRequest(text);
   const withoutOlx = /(без\s+олх|без\s+olx|exclude\s+olx)/i.test(text);
   const hasOlxHint = /(\bolx\b|олх)/i.test(text) && !withoutOlx;
   const hasLunHint = /(\blun\b|лун|ріелтор|rieltor)/i.test(text);
@@ -88,16 +91,27 @@ async function findListingsByIntent(text) {
     selected = selected.filter((x) => x.floor !== null && x.floor !== undefined);
   }
 
+  if (requestedComplex || requestedHeating) {
+    selected = selected.filter((x) => {
+      const inferred = inferListingComplexAndHeating(x);
+      if (requestedComplex && inferred.complex !== requestedComplex.name) return false;
+      if (requestedHeating && inferred.heating !== requestedHeating) return false;
+      return true;
+    });
+  }
+
   selected = (listMode === 'worst' ? [...selected].reverse() : selected).slice(0, requestedCount);
 
   return {
-    text: selected.map((x, i) => `${i + 1}) ${x.title || 'Квартира'} | ${x.price} ${x.currency || ''} | ${x.rooms || '?'}к | ${x.district || 'район не вказано'}\n${x.link || ''}`).join('\n\n'),
+    text: selected.map((x, i) => `${i + 1}) ${x.title || 'Квартира'} | ${x.price} ${x.currency || ''} | ${x.rooms || '?'}к | ${(inferListingComplexAndHeating(x).complex || x.district || 'район не вказано')} | опалення: ${inferListingComplexAndHeating(x).heating || 'не вказано'}\n${x.link || ''}`).join('\n\n'),
     lunFound: nonOlx.length > 0,
     olxFound: onlyOlx.length > 0,
     sourceHint,
     requestedCount,
     intent,
-    listMode
+    listMode,
+    requestedHeating,
+    requestedComplex: requestedComplex?.name || null
   };
 }
 
@@ -151,7 +165,8 @@ async function answer(text, chatId = 'default') {
       if (result.sourceHint === 'olx') prefix = result.olxFound ? 'Ось варіанти з OLX:' : 'OLX-варіанти не знайдено у вашій базі. Ось доступні зараз:';
       else if (result.sourceHint === 'lun') prefix = result.lunFound ? 'Ось варіанти з LUN:' : 'LUN-варіанти не знайдено — запустіть sync:lun. Ось доступні зараз:';
       else if (result.sourceHint === 'both') prefix = 'Ось змішаний список LUN + OLX (без пріоритету):';
-      const responseText = `${prefix}\n\n${result.text}`;
+      const filterLine = [result.requestedComplex ? `ЖК: ${result.requestedComplex}` : null, result.requestedHeating ? `Опалення: ${result.requestedHeating}` : null].filter(Boolean).join(' | ');
+      const responseText = `${prefix}${filterLine ? `\nФільтр: ${filterLine}` : ''}\n\n${result.text}`;
       appendMemory({ userText: text, replyText: responseText, intent: result.intent, listMode: result.listMode });
       lastAssistantReplyByChat.set(String(chatId), responseText);
       return responseText;

@@ -12,7 +12,14 @@
     "bot:telegram": "node telegram-bot.js",
     "enrich:rieltor": "node rieltor-enrich.js",
     "enrich:rieltor:all": "powershell -ExecutionPolicy Bypass -File ./enrich-rieltor-all.ps1",
-    "memory:show": "f=$(cat memory-vault/agent-memory/.active-memory.txt 2>/dev/null || echo real-estate-agent-memory.md); tail -n 120 memory-vault/agent-memory/$f"
+    "memory:show": "f=$(cat memory-vault/agent-memory/.active-memory.txt 2>/dev/null || echo real-estate-agent-memory.md); tail -n 120 memory-vault/agent-memory/$f",
+    "start": "node server.js",
+    "start:bot": "node telegram-bot.js",
+    "parse:olx": "node olx-parser.js",
+    "clean:olx": "node clean-data.js",
+    "upload:supabase": "node upload.js",
+    "pipeline:olx": "npm run parse:olx && npm run clean:olx && npm run upload:supabase",
+    "pipeline:lun": "npm run parse:lun && npm run upload:supabase"
   },
   "keywords": [],
   "author": "",

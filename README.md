@@ -66,3 +66,14 @@ notepad .\lun-parser.js
 notepad .\upload.js
 notepad .\clean-data.js
 ```
+
+
+## Supabase schema note
+
+Поточний `upload.js` пише тільки в такі колонки таблиці `apartments`:
+`id, title, price, location, link, area_total, area_kitchen, rooms, floor, floors_total, currency`.
+
+Поля `deal_type`, `district`, `street`, `floor_count` автоматично мапляться/ігноруються так, щоб не ламати insert:
+- `district/street/location` -> `location`
+- `floor_count` -> `floors_total`
+- `deal_type` не відправляється (бо колонки немає у вашій схемі)

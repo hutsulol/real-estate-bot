@@ -14,31 +14,61 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const data = JSON.parse(fs.readFileSync(INPUT_FILE, 'utf-8'));
 
+function toInt(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.trunc(n) : null;
+}
+
+function toNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function mapRow(item) {
+  const location = item.location || item.district || item.street || null;
+
+  return {
+    id: toInt(item.id),
+    title: item.title ?? null,
+    price: toInt(item.price),
+    location,
+    link: item.link ?? item.source_url ?? null,
+    area_total: toNumber(item.area_total),
+    area_kitchen: toNumber(item.area_kitchen),
+    rooms: toInt(item.rooms ?? item.room_count),
+    floor: toInt(item.floor),
+    floors_total: toInt(item.floors_total ?? item.floor_count),
+    currency: item.currency ?? null,
+  };
+}
+
 (async () => {
   console.log(`Загружаем ${data.length} записей в ${SUPABASE_TABLE}...`);
 
+  let ok = 0;
+  let failed = 0;
+
   for (const item of data) {
-    const { error } = await supabase.from(SUPABASE_TABLE).insert({
-      id: item.id,
-      title: item.title,
-      price: item.price,
-      currency: item.currency,
-      rooms: item.rooms ?? item.room_count ?? null,
-      district: item.district ?? null,
-      residential_complex: item.residential_complex ?? null,
-      street: item.street ?? null,
-      floor: item.floor ?? null,
-      floor_count: item.floor_count ?? null,
-      area_total: item.area_total ?? null,
-      link: item.link ?? item.source_url ?? null,
-      deal_type: item.deal_type ?? null,
-      source: item.source ?? null,
-    });
+    const row = mapRow(item);
+
+    if (row.id === null) {
+      failed += 1;
+      console.log('Skip row: invalid id', item.id);
+      continue;
+    }
+
+    const { error } = await supabase.from(SUPABASE_TABLE).upsert(row, { onConflict: 'id' });
 
     if (error) {
+      failed += 1;
       console.log('Insert error:', error.message);
+      continue;
     }
+
+    ok += 1;
   }
 
-  console.log('Готово 🚀');
+  console.log(`Готово 🚀 success=${ok} failed=${failed}`);
 })();

@@ -146,6 +146,8 @@ app.get('/search', async (req, res) => {
 
     if (error) {
       console.log("❌ Supabase error:", error);
+      res.set('Access-Control-Expose-Headers', 'X-Parsed-Filters');
+      res.set('X-Parsed-Filters', JSON.stringify(filters));
       return res.json([]);
     }
 
@@ -162,12 +164,51 @@ app.get('/search', async (req, res) => {
       return a.price - b.price;
     });
 
+    // Експонуємо розпізнані фільтри для фронта (debug у чаті)
+    res.set('Access-Control-Expose-Headers', 'X-Parsed-Filters');
+    res.set('X-Parsed-Filters', JSON.stringify(filters));
     res.json(clean.slice(0, 20));
 
   } catch (err) {
     console.log("❌ Server error:", err);
     res.json([]);
   }
+});
+
+// =======================
+// 📋 Список (без AI-фильтра)
+// =======================
+app.get('/listings', async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 100, 200);
+    let dbQuery = supabase.from('apartments').select('*').limit(limit);
+
+    if (req.query.rooms) dbQuery = dbQuery.eq('rooms', Number(req.query.rooms));
+    if (req.query.district) dbQuery = dbQuery.ilike('district', `%${req.query.district}%`);
+    if (req.query.max_price) dbQuery = dbQuery.lte('price', Number(req.query.max_price));
+    if (req.query.deal_type) dbQuery = dbQuery.eq('deal_type', req.query.deal_type);
+
+    const { data, error } = await dbQuery;
+    if (error) {
+      console.log('❌ Supabase error:', error);
+      return res.json([]);
+    }
+
+    let clean = deduplicate(data);
+    clean = addDealScore(clean);
+    clean.sort((a, b) => a.price - b.price);
+    res.json(clean);
+  } catch (err) {
+    console.log('❌ Server error:', err);
+    res.json([]);
+  }
+});
+
+// =======================
+// ❤️ Healthcheck
+// =======================
+app.get('/health', (_req, res) => {
+  res.json({ ok: true, time: new Date().toISOString() });
 });
 
 // =======================

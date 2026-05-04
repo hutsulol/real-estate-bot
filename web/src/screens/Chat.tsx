@@ -11,10 +11,10 @@ interface ChatScreenProps {
 }
 
 const QUICK_PROMPTS = [
-  { k: "1к до 35 000 USD", v: "будь-який район, будь-який стан" },
-  { k: "Оренда від власника", v: "Каскад або Центр, до 18 000 UAH" },
-  { k: "Новобудова 2020+", v: "Manhattan, Family Plaza, Up Hills" },
-  { k: "Терміновий продаж", v: "знижено за останні 3 дні" },
+  { k: "2к центр", v: "двокімнатна, район Центр" },
+  { k: "оренда центр", v: "оренда квартири в Центрі" },
+  { k: "купити квартиру до 2 000 000", v: "продаж, бюджет до 2 млн UAH" },
+  { k: "1к", v: "однокімнатна, будь-який район" },
 ];
 
 export function ChatScreen({ onPinTo }: ChatScreenProps) {
@@ -37,23 +37,29 @@ export function ChatScreen({ onPinTo }: ChatScreenProps) {
     setDraft("");
     setThinking(true);
     try {
-      const results = await searchListings(q);
+      const { results, filters } = await searchListings(q);
       const views = results.map(listingToView);
+      const filterPills = describeFilters(filters);
       const aiText = views.length
-        ? `Знайшов ${views.length} варіантів за вашим запитом. Ось топ:`
-        : "За цим запитом нічого не знайшов. Спробуйте змінити критерії.";
+        ? `Знайшов ${views.length} варіантів${filterPills ? ` (${filterPills})` : ""}. Ось топ:`
+        : `За цим запитом нічого не знайшов${filterPills ? ` (${filterPills})` : ""}. AI-парсер міг занадто звузити критерії — спробуйте простіше: «2к центр», «оренда центр», «купити квартиру до 2000000».`;
       setMessages((m) => [
         ...m,
         {
           role: "ai",
           text: aiText,
-          tools: views.length
-            ? [
-                { src: "DOM.RIA", count: Math.ceil(views.length * 0.4), ok: true },
-                { src: "LUN", count: Math.ceil(views.length * 0.3), ok: true },
-                { src: "OLX", count: Math.ceil(views.length * 0.3), ok: true },
-              ]
-            : undefined,
+          tools: [
+            {
+              src: "openai · parseQuery",
+              count: Object.values(filters).filter((v) => v != null).length,
+              ok: true,
+            },
+            {
+              src: `supabase · apartments${views.length ? ` (${views.length})` : ""}`,
+              count: views.length,
+              ok: views.length > 0,
+            },
+          ],
           listings: views.slice(0, 6),
         },
       ]);
@@ -69,6 +75,15 @@ export function ChatScreen({ onPinTo }: ChatScreenProps) {
     } finally {
       setThinking(false);
     }
+  };
+
+  const describeFilters = (f: { rooms?: number | null; district?: string | null; max_price?: number | null; deal_type?: string | null }) => {
+    const parts: string[] = [];
+    if (f.rooms != null) parts.push(`${f.rooms}к`);
+    if (f.district) parts.push(f.district);
+    if (f.max_price != null) parts.push(`до ${f.max_price.toLocaleString("uk-UA")}`);
+    if (f.deal_type) parts.push(f.deal_type === "rent" ? "оренда" : "продаж");
+    return parts.join(" · ");
   };
 
   const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Icon } from "../components/Icon";
 import { ListingCard } from "../components/ListingCard";
 import { SourceChip } from "../components/SourceChip";
-import { listingToView, searchListings } from "../lib/api";
+import { getAllListings, listingToView } from "../lib/api";
 import type { ListingView, Source } from "../types";
 
 type SortBy = "fresh" | "price" | "area";
@@ -18,10 +18,10 @@ export function ListingsScreen() {
     setLoading(true);
     setError(null);
     try {
-      const results = await searchListings("квартира івано-франківськ");
+      const results = await getAllListings({ limit: 100 });
       setItems(results.map(listingToView));
     } catch (e) {
-      setError("Не вдалось завантажити дані. Перевірте, що бекенд запущено.");
+      setError("Не вдалось завантажити дані. Перевірте, що бекенд запущено на http://localhost:3000.");
       setItems([]);
     } finally {
       setLoading(false);

@@ -8,7 +8,19 @@ export interface ParsedFilters {
   rooms?: number | null;
   district?: string | null;
   max_price?: number | null;
+  currency?: string | null;
   deal_type?: "rent" | "sale" | null;
+  floor_eq?: number | null;
+  floor_min?: number | null;
+  floor_max?: number | null;
+  area_min?: number | null;
+  area_max?: number | null;
+  year_from?: number | null;
+  heating?: string | null;
+  walls?: string | null;
+  has_repair?: boolean | null;
+  is_secondary?: boolean | null;
+  complex?: string | null;
 }
 
 export interface SearchResponse {
@@ -37,16 +49,27 @@ export interface ListingsParams {
   district?: string;
   max_price?: number;
   deal_type?: "rent" | "sale";
+  floor?: number;
+  floor_min?: number;
+  floor_max?: number;
+  area_min?: number;
+  area_max?: number;
+  year_from?: number;
+  heating?: string;
+  walls?: string;
+  has_repair?: boolean;
+  is_secondary?: boolean;
+  source?: string;
+  complex?: string;
   limit?: number;
 }
 
 export async function getAllListings(params: ListingsParams = {}): Promise<Listing[]> {
   const qs = new URLSearchParams();
-  if (params.rooms != null) qs.set("rooms", String(params.rooms));
-  if (params.district) qs.set("district", params.district);
-  if (params.max_price != null) qs.set("max_price", String(params.max_price));
-  if (params.deal_type) qs.set("deal_type", params.deal_type);
-  if (params.limit != null) qs.set("limit", String(params.limit));
+  for (const [k, v] of Object.entries(params)) {
+    if (v == null) continue;
+    qs.set(k, String(v));
+  }
   const url = `${API_BASE}/listings${qs.toString() ? `?${qs}` : ""}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Listings failed: ${res.status}`);
@@ -55,7 +78,7 @@ export async function getAllListings(params: ListingsParams = {}): Promise<Listi
 }
 
 // Round-robin a source label so the UI can colour-tag a listing even though
-// the backend does not yet record which scraper produced it.
+// the backend does not always record which scraper produced it.
 function inferSource(id: string): Source {
   const sources: Source[] = ["olx", "ria", "lun"];
   let h = 0;
@@ -68,13 +91,24 @@ export function listingToView(l: Listing): ListingView {
     id: l.id,
     title: l.title,
     rooms: l.rooms,
+    area: l.area_total,
+    areaLiving: l.area_living,
+    areaKitchen: l.area_kitchen,
+    floor: l.floor,
+    floors: l.total_floors,
     price: l.price,
     currency: l.currency,
     district: l.district,
     complex: l.residential_complex,
     street: l.street,
+    walls: l.walls,
+    heating: l.heating,
+    yearBuilt: l.year_built,
+    hasRepair: l.has_repair,
+    isSecondary: l.is_secondary,
     source: l.source ?? inferSource(l.id),
     link: l.link,
     deal: l.deal,
+    dealType: l.deal_type,
   };
 }

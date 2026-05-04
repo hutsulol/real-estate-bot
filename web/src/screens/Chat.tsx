@@ -11,10 +11,10 @@ interface ChatScreenProps {
 }
 
 const QUICK_PROMPTS = [
-  { k: "2к центр", v: "двокімнатна, район Центр" },
-  { k: "оренда центр", v: "оренда квартири в Центрі" },
-  { k: "купити квартиру до 2 000 000", v: "продаж, бюджет до 2 млн UAH" },
-  { k: "1к", v: "однокімнатна, будь-який район" },
+  { k: "2к центр, 5 поверх", v: "двокімнатна на 5-му поверсі в Центрі" },
+  { k: "купити 3к до 70000 USD з ремонтом", v: "продаж з ремонтом, бюджет 70k USD" },
+  { k: "оренда 1к центр", v: "оренда однокімнатної в Центрі" },
+  { k: "квартири від 4 поверху, цегла", v: "поверх ≥ 4, цегляні стіни" },
 ];
 
 export function ChatScreen({ onPinTo }: ChatScreenProps) {
@@ -77,12 +77,25 @@ export function ChatScreen({ onPinTo }: ChatScreenProps) {
     }
   };
 
-  const describeFilters = (f: { rooms?: number | null; district?: string | null; max_price?: number | null; deal_type?: string | null }) => {
+  const describeFilters = (f: import("../lib/api").ParsedFilters) => {
     const parts: string[] = [];
     if (f.rooms != null) parts.push(`${f.rooms}к`);
     if (f.district) parts.push(f.district);
-    if (f.max_price != null) parts.push(`до ${f.max_price.toLocaleString("uk-UA")}`);
+    if (f.complex) parts.push(`ЖК ${f.complex}`);
+    if (f.max_price != null) parts.push(`до ${f.max_price.toLocaleString("uk-UA")}${f.currency ? ` ${f.currency}` : ""}`);
     if (f.deal_type) parts.push(f.deal_type === "rent" ? "оренда" : "продаж");
+    if (f.floor_eq != null) parts.push(`${f.floor_eq} пов`);
+    if (f.floor_min != null || f.floor_max != null)
+      parts.push(`пов ${f.floor_min ?? "?"}–${f.floor_max ?? "?"}`);
+    if (f.area_min != null || f.area_max != null)
+      parts.push(`${f.area_min ?? "?"}–${f.area_max ?? "?"} м²`);
+    if (f.year_from != null) parts.push(`від ${f.year_from} р.`);
+    if (f.heating) parts.push(f.heating);
+    if (f.walls) parts.push(f.walls);
+    if (f.has_repair === true) parts.push("з ремонтом");
+    if (f.has_repair === false) parts.push("без ремонту");
+    if (f.is_secondary === true) parts.push("вторинка");
+    if (f.is_secondary === false) parts.push("новобудова");
     return parts.join(" · ");
   };
 

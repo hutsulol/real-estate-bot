@@ -1,4 +1,5 @@
 const fs = require('fs');
+const { extractAll } = require('./lib/extract');
 
 // читаем сырые данные
 const rawData = JSON.parse(fs.readFileSync('data.json', 'utf-8'));
@@ -23,16 +24,6 @@ function parsePrice(priceStr) {
     };
 }
 
-// 👉 функция определения количества комнат
-function parseRooms(title) {
-    if (!title) return null;
-
-    const match = title.match(/(\d+)[-\s]?(к|кім|ком)/i);
-    if (match) return parseInt(match[1]);
-
-    return null;
-}
-
 // 👉 функция очистки title
 function cleanTitle(title) {
     return title
@@ -44,16 +35,30 @@ function cleanTitle(title) {
 // 👉 основная обработка
 const cleanedData = rawData.map(item => {
     const { price, currency } = parsePrice(item.price);
-    const rooms = parseRooms(item.title);
+    const extracted = extractAll(item.title);
 
     return {
         id: item.id,
         title: item.title,
         normalized_title: cleanTitle(item.title),
         price,
-        currency,
-        rooms,
-        link: item.link
+        currency: currency || 'UAH',
+        link: item.link,
+        // structured fields from extractAll
+        rooms: extracted.rooms,
+        floor: extracted.floor,
+        total_floors: extracted.total_floors,
+        area_total: extracted.area_total,
+        area_living: extracted.area_living,
+        area_kitchen: extracted.area_kitchen,
+        walls: extracted.walls,
+        heating: extracted.heating,
+        year_built: extracted.year_built,
+        has_repair: extracted.has_repair,
+        is_secondary: extracted.is_secondary,
+        deal_type: extracted.deal_type || item.deal_type || null,
+        residential_complex: extracted.residential_complex,
+        street: extracted.street,
     };
 });
 

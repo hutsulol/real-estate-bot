@@ -6,17 +6,24 @@ interface ListingCardProps {
   onPin?: () => void;
 }
 
+function formatArea(d: ListingView): string | null {
+  if (d.area && d.areaLiving && d.areaKitchen) {
+    return `${d.area} / ${d.areaLiving} / ${d.areaKitchen} м²`;
+  }
+  if (d.area) return `${d.area} м²`;
+  return null;
+}
+
 export function ListingCard({ data, onPin }: ListingCardProps) {
   const subtitle = data.complex && data.complex !== "—" ? data.complex : data.street;
-  const title =
-    data.title ??
-    [
-      data.rooms ? `${data.rooms}к` : null,
-      data.area ? `${data.area} м²` : null,
-      subtitle,
-    ]
-      .filter(Boolean)
-      .join(" · ");
+  const titleParts = [
+    data.rooms ? `${data.rooms}к` : null,
+    formatArea(data),
+    subtitle,
+  ].filter(Boolean);
+  const title = titleParts.length ? titleParts.join(" · ") : data.title;
+
+  const dealBadge = data.dealType === "rent" ? "оренда" : data.dealType === "sale" ? "продаж" : null;
 
   return (
     <div className="listing">
@@ -26,20 +33,33 @@ export function ListingCard({ data, onPin }: ListingCardProps) {
             {data.price.toLocaleString("uk-UA")}{" "}
             <span className="ccy">{data.currency}</span>
           </div>
-          {data.posted && (
-            <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>
-              {data.posted}
-            </div>
-          )}
+          <div className="row gap-6" style={{ marginTop: 4 }}>
+            {dealBadge && <span className="badge neutral">{dealBadge}</span>}
+            {data.deal === "🔥 выгодно" && <span className="badge success">🔥 вигідно</span>}
+            {data.deal === "дорого" && <span className="badge warning">дорого</span>}
+            {data.posted && (
+              <span className="muted" style={{ fontSize: 11.5 }}>
+                {data.posted}
+              </span>
+            )}
+          </div>
         </div>
         <span className={`listing-source ${data.source}`}>{data.source}</span>
       </div>
-      <div className="listing-title">{title}</div>
+
+      {title && <div className="listing-title">{title}</div>}
+
       <div className="listing-meta">
         {data.district && (
           <>
             <div className="k">Район</div>
             <div>{data.district}</div>
+          </>
+        )}
+        {data.complex && data.complex !== "—" && (
+          <>
+            <div className="k">ЖК</div>
+            <div>{data.complex}</div>
           </>
         )}
         {data.street && (
@@ -48,12 +68,16 @@ export function ListingCard({ data, onPin }: ListingCardProps) {
             <div>{data.street}</div>
           </>
         )}
-        {data.floor && data.floors && (
+        {data.floor != null && (
           <>
             <div className="k">Поверх</div>
-            <div>
-              {data.floor} / {data.floors}
-            </div>
+            <div>{data.floors != null ? `${data.floor} / ${data.floors}` : data.floor}</div>
+          </>
+        )}
+        {(data.area || data.areaLiving || data.areaKitchen) && (
+          <>
+            <div className="k">Площа</div>
+            <div>{formatArea(data)}</div>
           </>
         )}
         {data.walls && (
@@ -74,13 +98,20 @@ export function ListingCard({ data, onPin }: ListingCardProps) {
             <div>{data.yearBuilt}</div>
           </>
         )}
-        {data.deal && (
+        {data.hasRepair != null && (
           <>
-            <div className="k">Оцінка</div>
-            <div>{data.deal}</div>
+            <div className="k">Ремонт</div>
+            <div>{data.hasRepair ? "є" : "немає"}</div>
+          </>
+        )}
+        {data.isSecondary != null && (
+          <>
+            <div className="k">Тип</div>
+            <div>{data.isSecondary ? "вторинка" : "новобудова"}</div>
           </>
         )}
       </div>
+
       <div className="listing-foot">
         <button className="btn btn-sm btn-ghost" onClick={onPin}>
           <Icon name="pin" size={13} /> До клієнта

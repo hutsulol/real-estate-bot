@@ -441,7 +441,15 @@ class RealtorMod(loader.Module):
             url += "?" + query
         async with aiohttp.ClientSession() as s:
             async with s.get(url, headers=self._sb_headers()) as r:
-                r.raise_for_status()
+                if r.status == 404:
+                    raise RuntimeError(
+                        f"Supabase 404 on table '{table}'. Прогони "
+                        f"migrations/0002_crm_tables.sql у проекті "
+                        f"{self.config['supabase_url']}."
+                    )
+                if r.status >= 300:
+                    body = await r.text()
+                    raise RuntimeError(f"GET {table} {r.status}: {body[:200]}")
                 return await r.json()
 
     async def _sb_post(self, table: str, data):

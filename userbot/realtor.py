@@ -32,6 +32,7 @@ Commands:
 
 import asyncio
 import json
+import logging
 import os
 import random
 import subprocess
@@ -47,9 +48,13 @@ from .. import loader, utils  # noqa: F401  (loader/utils may be globals at runt
 
 import openai
 
+# Hikka pipes the standard logging module into hikka-logs; bare print()
+# calls don't get captured. Always log through this.
+logger = logging.getLogger(__name__)
+
 # Bump on every release so .realtor_status / .realtor_diag tell you at
 # a glance whether the running module matches the latest commit.
-_BUILD = "2026-05-07.4-diag"
+_BUILD = "2026-05-07.5-logging"
 
 
 @loader.tds
@@ -149,7 +154,7 @@ class RealtorMod(loader.Module):
         try:
             await self._pull_vault()
         except Exception as e:
-            print(f"[Realtor] vault pull on init failed: {e}")
+            logger.info(f"[Realtor] vault pull on init failed: {e}")
         self._task = asyncio.create_task(self._scan_loop())
 
     async def on_unload(self):
@@ -251,7 +256,7 @@ class RealtorMod(loader.Module):
             # Filter to inbound private messages manually so we can log
             # exactly why a message was skipped.
             if test:
-                print(
+                logger.info(
                     f"[Realtor] watcher hit: chat={getattr(message, 'chat_id', None)} "
                     f"out={getattr(message, 'out', None)} "
                     f"is_private={getattr(message, 'is_private', None)}"
@@ -262,21 +267,21 @@ class RealtorMod(loader.Module):
                 return
             if not self.config["active"]:
                 if test:
-                    print("[Realtor] skip: master switch off")
+                    logger.info("[Realtor] skip: master switch off")
                 return
             sender = await message.get_sender()
             if not sender:
                 if test:
-                    print("[Realtor] skip: no sender")
+                    logger.info("[Realtor] skip: no sender")
                 return
             if getattr(sender, "bot", False):
                 if test:
-                    print(f"[Realtor] skip: sender is bot @{sender.username}")
+                    logger.info(f"[Realtor] skip: sender is bot @{sender.username}")
                 return
 
             username = "@" + sender.username if sender.username else None
             if test:
-                print(
+                logger.info(
                     f"[Realtor] inbound from {username or '(no username)'} "
                     f"id={sender.id} chat={message.chat_id}"
                 )
@@ -285,21 +290,21 @@ class RealtorMod(loader.Module):
             if not client:
                 if not self.config["auto_register"]:
                     if test:
-                        print("[Realtor] skip: stranger and auto_register=false")
+                        logger.info("[Realtor] skip: stranger and auto_register=false")
                     return
                 try:
                     client = await self._auto_register_client(sender, username)
                 except Exception as e:
-                    print(f"[Realtor] auto-register failed: {e!r}")
+                    logger.error(f"[Realtor] auto-register failed: {e!r}")
                     return
                 if not client:
-                    print("[Realtor] auto-register returned no row — check supabase_key/RLS")
+                    logger.error("[Realtor] auto-register returned no row — check supabase_key/RLS")
                     return
                 if test:
-                    print(f"[Realtor] auto-registered client id={client['id']}")
+                    logger.info(f"[Realtor] auto-registered client id={client['id']}")
             if client["status"] != "active" or not client["auto_enabled"]:
                 if test:
-                    print(
+                    logger.info(
                         f"[Realtor] skip: client status={client['status']} "
                         f"auto_enabled={client['auto_enabled']}"
                     )
@@ -308,10 +313,10 @@ class RealtorMod(loader.Module):
             text = _inbound_text(message)
             if not text:
                 if test:
-                    print("[Realtor] skip: empty inbound (no text/media match)")
+                    logger.info("[Realtor] skip: empty inbound (no text/media match)")
                 return
             if test:
-                print(f"[Realtor] text={text[:80]!r}")
+                logger.info(f"[Realtor] text={text[:80]!r}")
 
             await self._log_message(
                 client["id"], "in", text, tg_message_id=message.id
@@ -324,19 +329,19 @@ class RealtorMod(loader.Module):
             try:
                 await self._sb_patch(f"clients?id=eq.{client['id']}", patch)
             except Exception as e:
-                print(f"[Realtor] patch client failed: {e!r}")
+                logger.info(f"[Realtor] patch client failed: {e!r}")
 
             try:
                 reply = await self._generate_reply(client, text)
             except Exception as e:
-                print(f"[Realtor] OpenAI generation failed: {e!r}")
+                logger.error(f"[Realtor] OpenAI generation failed: {e!r}")
                 return
             if not reply:
                 if test:
-                    print("[Realtor] skip: empty reply from OpenAI")
+                    logger.info("[Realtor] skip: empty reply from OpenAI")
                 return
             if test:
-                print(f"[Realtor] reply={reply[:80]!r}")
+                logger.info(f"[Realtor] reply={reply[:80]!r}")
 
             if test:
                 # TEST MODE: near-instant reply, ~0.3-1.5s "typing".
@@ -351,6 +356,7 @@ class RealtorMod(loader.Module):
                     delay = max(15.0, min(delay, 30 * 60))
                 await asyncio.sleep(delay)
 
+            sent = None
             try:
                 async with self._client.action(message.chat_id, "typing"):
                     type_for = (
@@ -359,12 +365,24 @@ class RealtorMod(loader.Module):
                         else min(15.0, max(2.0, len(reply) * 0.04))
                     )
                     await asyncio.sleep(type_for)
-                    sent = await self._client.send_message(message.chat_id, reply)
+                    # message.respond uses the existing peer (works for
+                    # anonymous +888 numbers and other tricky entities
+                    # where send_message(chat_id) can hit ChannelInvalid).
+                    sent = await message.respond(reply)
             except Exception as e:
-                print(f"[Realtor] send failed: {e!r}")
+                logger.warning(
+                    f"[Realtor] respond failed: {e!r}; trying send_message fallback"
+                )
+                try:
+                    sent = await self._client.send_message(message.chat_id, reply)
+                except Exception as e2:
+                    logger.error(f"[Realtor] send_message also failed: {e2!r}")
+                    return
+            if not sent:
+                logger.error("[Realtor] send returned None")
                 return
             if test:
-                print(f"[Realtor] sent msg_id={sent.id}")
+                logger.info(f"[Realtor] sent msg_id={sent.id}")
 
             await self._log_message(
                 client["id"], "out", reply, tg_message_id=sent.id, ai=True
@@ -379,7 +397,7 @@ class RealtorMod(loader.Module):
                 pass
         except Exception as e:
             # Anything unexpected — log loudly so it shows in hikka-logs.
-            print(f"[Realtor] watcher crashed: {e!r}")
+            logger.exception(f"[Realtor] watcher crashed: {e!r}")
 
     # ════════════════════════════ scan loop ═════════════════════════════
     async def _scan_loop(self):
@@ -390,7 +408,7 @@ class RealtorMod(loader.Module):
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                print(f"[Realtor] scan loop error: {e}")
+                logger.info(f"[Realtor] scan loop error: {e}")
             try:
                 await asyncio.wait_for(
                     self._stop.wait(),
@@ -409,7 +427,7 @@ class RealtorMod(loader.Module):
             try:
                 await self._maybe_message_client(c)
             except Exception as e:
-                print(f"[Realtor] client {c.get('username')}: {e}")
+                logger.info(f"[Realtor] client {c.get('username')}: {e}")
 
     async def _maybe_message_client(self, client: dict):
         # Quiet hours from per-client config (falls back to module config below).
@@ -446,7 +464,7 @@ class RealtorMod(loader.Module):
         try:
             entity = await self._resolve_entity(client)
         except Exception as e:
-            print(f"[Realtor] cannot resolve {client.get('username')}: {e}")
+            logger.info(f"[Realtor] cannot resolve {client.get('username')}: {e}")
             return
 
         sent = await self._client.send_message(entity, text)
@@ -542,16 +560,16 @@ class RealtorMod(loader.Module):
             "auto_enabled": True,
             "initiate": False,
         }
-        print(f"[Realtor] auto-register insert: {row}")
+        logger.info(f"[Realtor] auto-register insert: {row}")
         try:
             await self._sb_post("clients", row)
         except Exception as e:
             # 409 conflict on UNIQUE(username) is fine — refetch below.
             # Anything else (401/403/RLS/missing key) gets logged.
-            print(f"[Realtor] insert client failed (will refetch): {e!r}")
+            logger.info(f"[Realtor] insert client failed (will refetch): {e!r}")
         found = await self._find_client(username, sender.id)
         if not found:
-            print(
+            logger.warning(
                 "[Realtor] refetch returned None — likely supabase_key wrong "
                 "or RLS blocks anon inserts. Use service_role key."
             )
@@ -615,7 +633,7 @@ class RealtorMod(loader.Module):
             await self._sb_post("pinned_listings", rows)
         except Exception as e:
             # Likely conflict on (client_id, listing_id) — fine, ignore.
-            print(f"[Realtor] pin notify conflict (ok): {e}")
+            logger.info(f"[Realtor] pin notify conflict (ok): {e}")
 
     async def _log_message(
         self, client_id, direction, text, tg_message_id=None, ai=False
@@ -634,7 +652,7 @@ class RealtorMod(loader.Module):
         try:
             await self._sb_post("chat_messages", row)
         except Exception as e:
-            print(f"[Realtor] log_message failed: {e}")
+            logger.info(f"[Realtor] log_message failed: {e}")
 
     async def _resolve_entity(self, client):
         if client.get("telegram_id"):

@@ -47,6 +47,10 @@ from .. import loader, utils  # noqa: F401  (loader/utils may be globals at runt
 
 import openai
 
+# Bump on every release so .realtor_status / .realtor_diag tell you at
+# a glance whether the running module matches the latest commit.
+_BUILD = "2026-05-07.4-diag"
+
 
 @loader.tds
 class RealtorMod(loader.Module):
@@ -58,7 +62,7 @@ class RealtorMod(loader.Module):
         "started": "<b>✅ Realtor увімкнено</b>",
         "stopped": "<b>⏸ Realtor вимкнено</b>",
         "status": (
-            "<b>Realtor</b>\n"
+            "<b>Realtor</b> · build <code>{build}</code>\n"
             "Master switch: <code>{state}</code>\n"
             "Клієнтів: <b>{total}</b> (активних: <b>{active}</b>)\n"
             "Надіслано за сесію: <b>{sent}</b>\n"
@@ -165,6 +169,7 @@ class RealtorMod(loader.Module):
         await utils.answer(
             message,
             self.strings["status"].format(
+                build=_BUILD,
                 state="active" if self.config["active"] else "paused",
                 total=len(clients),
                 active=active,

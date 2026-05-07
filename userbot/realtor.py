@@ -174,6 +174,27 @@ class RealtorMod(loader.Module):
             ),
         )
 
+    async def realtor_diagcmd(self, message: Message):
+        """Self-diagnostic: config flags + Supabase reachability"""
+        url = self.config["supabase_url"]
+        sb_key = self.config["supabase_key"] or ""
+        oai_key = self.config["openai_key"] or ""
+        lines = [
+            "<b>Realtor diag</b>",
+            f"active = <code>{self.config['active']}</code>",
+            f"auto_register = <code>{self.config['auto_register']}</code>",
+            f"test_mode = <code>{self.config['test_mode']}</code>",
+            f"supabase_url = <code>{url}</code>",
+            f"supabase_key = <code>{'set (' + str(len(sb_key)) + ' chars)' if sb_key else 'EMPTY'}</code>",
+            f"openai_key = <code>{'set (' + str(len(oai_key)) + ' chars)' if oai_key else 'EMPTY'}</code>",
+        ]
+        try:
+            rows = await self._sb_get("clients", "select=id&limit=1")
+            lines.append(f"clients table = <code>OK ({len(rows)} row sample)</code>")
+        except Exception as e:
+            lines.append(f"clients table = <code>FAIL {e}</code>")
+        await utils.answer(message, "\n".join(lines))
+
     async def realtor_startcmd(self, message: Message):
         """Enable master switch"""
         self.config["active"] = True
@@ -217,17 +238,27 @@ class RealtorMod(loader.Module):
             await utils.answer(message, f"<b>❌ send failed:</b> <code>{e}</code>")
 
     # ════════════════════════════ watcher ═══════════════════════════════
-    @loader.watcher(only_pm=True, no_commands=True)
+    @loader.watcher()
     async def on_inbound_pm(self, message: Message):
         """Inbound PM → AI reply (auto-registers unknown senders)."""
         test = bool(self.config["test_mode"])
         try:
+            # Filter to inbound private messages manually so we can log
+            # exactly why a message was skipped.
+            if test:
+                print(
+                    f"[Realtor] watcher hit: chat={getattr(message, 'chat_id', None)} "
+                    f"out={getattr(message, 'out', None)} "
+                    f"is_private={getattr(message, 'is_private', None)}"
+                )
+            if not getattr(message, "is_private", False):
+                return
+            if getattr(message, "out", False):
+                return
             if not self.config["active"]:
                 if test:
                     print("[Realtor] skip: master switch off")
                 return
-            if getattr(message, "out", False):
-                return  # only inbound
             sender = await message.get_sender()
             if not sender:
                 if test:

@@ -124,6 +124,12 @@ class RealtorMod(loader.Module):
                 "Авто-додавати в БД клієнта, який написав уперше, і одразу відповідати йому",
                 validator=loader.validators.Boolean(),
             ),
+            loader.ConfigValue(
+                "test_mode",
+                True,
+                "TEST: миттєва відповідь без затримок + докладні логи [Realtor]",
+                validator=loader.validators.Boolean(),
+            ),
         )
         self._task = None
         self._stop = asyncio.Event()
@@ -213,88 +219,131 @@ class RealtorMod(loader.Module):
     # ════════════════════════════ watcher ═══════════════════════════════
     @loader.watcher(only_pm=True, no_commands=True)
     async def on_inbound_pm(self, message: Message):
-        """Inbound PM from a known client → AI reply."""
-        if not self.config["active"]:
-            return
-        if getattr(message, "out", False):
-            return  # only inbound
-        sender = await message.get_sender()
-        if not sender or getattr(sender, "bot", False):
-            return
-
-        username = "@" + sender.username if sender.username else None
-        client = await self._find_client(username, sender.id)
-        if not client:
-            if not self.config["auto_register"]:
-                return  # stranger — out of scope
-            try:
-                client = await self._auto_register_client(sender, username)
-            except Exception as e:
-                print(f"[Realtor] auto-register failed: {e}")
+        """Inbound PM → AI reply (auto-registers unknown senders)."""
+        test = bool(self.config["test_mode"])
+        try:
+            if not self.config["active"]:
+                if test:
+                    print("[Realtor] skip: master switch off")
                 return
+            if getattr(message, "out", False):
+                return  # only inbound
+            sender = await message.get_sender()
+            if not sender:
+                if test:
+                    print("[Realtor] skip: no sender")
+                return
+            if getattr(sender, "bot", False):
+                if test:
+                    print(f"[Realtor] skip: sender is bot @{sender.username}")
+                return
+
+            username = "@" + sender.username if sender.username else None
+            if test:
+                print(
+                    f"[Realtor] inbound from {username or '(no username)'} "
+                    f"id={sender.id} chat={message.chat_id}"
+                )
+
+            client = await self._find_client(username, sender.id)
             if not client:
+                if not self.config["auto_register"]:
+                    if test:
+                        print("[Realtor] skip: stranger and auto_register=false")
+                    return
+                try:
+                    client = await self._auto_register_client(sender, username)
+                except Exception as e:
+                    print(f"[Realtor] auto-register failed: {e!r}")
+                    return
+                if not client:
+                    print("[Realtor] auto-register returned no row — check supabase_key/RLS")
+                    return
+                if test:
+                    print(f"[Realtor] auto-registered client id={client['id']}")
+            if client["status"] != "active" or not client["auto_enabled"]:
+                if test:
+                    print(
+                        f"[Realtor] skip: client status={client['status']} "
+                        f"auto_enabled={client['auto_enabled']}"
+                    )
                 return
-        if client["status"] != "active" or not client["auto_enabled"]:
-            return
 
-        text = _inbound_text(message)
-        if not text:
-            return
+            text = _inbound_text(message)
+            if not text:
+                if test:
+                    print("[Realtor] skip: empty inbound (no text/media match)")
+                return
+            if test:
+                print(f"[Realtor] text={text[:80]!r}")
 
-        await self._log_message(
-            client["id"], "in", text, tg_message_id=message.id
-        )
-        self._stats["msgs_received"] += 1
-
-        # Cache telegram_id + bump last_inbound_at for future runs.
-        patch = {"last_inbound_at": _iso_now()}
-        if not client.get("telegram_id"):
-            patch["telegram_id"] = sender.id
-        try:
-            await self._sb_patch(f"clients?id=eq.{client['id']}", patch)
-        except Exception as e:
-            print(f"[Realtor] patch client failed: {e}")
-
-        # Generate reply
-        try:
-            reply = await self._generate_reply(client, text)
-        except Exception as e:
-            print(f"[Realtor] OpenAI generation failed: {e}")
-            return
-        if not reply:
-            return
-
-        # Human-like delay. First reply to a client is short (greeting feels
-        # alive); follow-ups use the per-client delay_min..delay_max range.
-        if not client.get("last_outbound_at"):
-            delay = random.uniform(8.0, 35.0)
-        else:
-            d_min = max(0, int(client.get("delay_min") or 1))
-            d_max = max(d_min, int(client.get("delay_max") or d_min))
-            delay = random.uniform(d_min * 60, d_max * 60)
-            delay = max(15.0, min(delay, 30 * 60))  # hard clamp 15s..30min
-        await asyncio.sleep(delay)
-
-        # "typing…" action while we "compose" the reply
-        try:
-            async with self._client.action(message.chat_id, "typing"):
-                await asyncio.sleep(min(15.0, max(2.0, len(reply) * 0.04)))
-                sent = await self._client.send_message(message.chat_id, reply)
-        except Exception as e:
-            print(f"[Realtor] send failed: {e}")
-            return
-
-        await self._log_message(
-            client["id"], "out", reply, tg_message_id=sent.id, ai=True
-        )
-        self._stats["msgs_sent"] += 1
-        try:
-            await self._sb_patch(
-                f"clients?id=eq.{client['id']}",
-                {"last_outbound_at": _iso_now()},
+            await self._log_message(
+                client["id"], "in", text, tg_message_id=message.id
             )
-        except Exception:
-            pass
+            self._stats["msgs_received"] += 1
+
+            patch = {"last_inbound_at": _iso_now()}
+            if not client.get("telegram_id"):
+                patch["telegram_id"] = sender.id
+            try:
+                await self._sb_patch(f"clients?id=eq.{client['id']}", patch)
+            except Exception as e:
+                print(f"[Realtor] patch client failed: {e!r}")
+
+            try:
+                reply = await self._generate_reply(client, text)
+            except Exception as e:
+                print(f"[Realtor] OpenAI generation failed: {e!r}")
+                return
+            if not reply:
+                if test:
+                    print("[Realtor] skip: empty reply from OpenAI")
+                return
+            if test:
+                print(f"[Realtor] reply={reply[:80]!r}")
+
+            if test:
+                # TEST MODE: near-instant reply, ~0.3-1.5s "typing".
+                await asyncio.sleep(random.uniform(0.2, 1.0))
+            else:
+                if not client.get("last_outbound_at"):
+                    delay = random.uniform(8.0, 35.0)
+                else:
+                    d_min = max(0, int(client.get("delay_min") or 1))
+                    d_max = max(d_min, int(client.get("delay_max") or d_min))
+                    delay = random.uniform(d_min * 60, d_max * 60)
+                    delay = max(15.0, min(delay, 30 * 60))
+                await asyncio.sleep(delay)
+
+            try:
+                async with self._client.action(message.chat_id, "typing"):
+                    type_for = (
+                        random.uniform(0.3, 1.5)
+                        if test
+                        else min(15.0, max(2.0, len(reply) * 0.04))
+                    )
+                    await asyncio.sleep(type_for)
+                    sent = await self._client.send_message(message.chat_id, reply)
+            except Exception as e:
+                print(f"[Realtor] send failed: {e!r}")
+                return
+            if test:
+                print(f"[Realtor] sent msg_id={sent.id}")
+
+            await self._log_message(
+                client["id"], "out", reply, tg_message_id=sent.id, ai=True
+            )
+            self._stats["msgs_sent"] += 1
+            try:
+                await self._sb_patch(
+                    f"clients?id=eq.{client['id']}",
+                    {"last_outbound_at": _iso_now()},
+                )
+            except Exception:
+                pass
+        except Exception as e:
+            # Anything unexpected — log loudly so it shows in hikka-logs.
+            print(f"[Realtor] watcher crashed: {e!r}")
 
     # ════════════════════════════ scan loop ═════════════════════════════
     async def _scan_loop(self):
@@ -434,33 +483,35 @@ class RealtorMod(loader.Module):
         return None
 
     async def _auto_register_client(self, sender, username):
-        """Create a clients row for a previously-unknown sender and return it.
-
-        Auto-registered clients have empty criteria → not picked up by the
-        proactive scan loop (initiate=false), but auto_enabled stays true so
-        they get AI replies on inbound DMs.
-        """
+        """Create a clients row for a previously-unknown sender and return it."""
         first = (getattr(sender, "first_name", None) or "").strip()
         last = (getattr(sender, "last_name", None) or "").strip()
         full = (first + " " + last).strip()
         name = full or (username.lstrip("@") if username else None) or f"tg:{sender.id}"
         row = {
             "name": name,
-            "username": username,  # may be None — UNIQUE allows multiple NULLs
+            "username": username,
             "telegram_id": sender.id,
             "description": "Авто-додано з вхідного DM",
             "criteria": {},
             "status": "active",
             "auto_enabled": True,
-            "initiate": False,  # no criteria → don't proactively spam listings
+            "initiate": False,
         }
+        print(f"[Realtor] auto-register insert: {row}")
         try:
             await self._sb_post("clients", row)
         except Exception as e:
-            # Could be a race against another insert with the same username.
-            # Fall through to a refetch — if the row exists now, we'll use it.
-            print(f"[Realtor] insert client (will refetch): {e}")
-        return await self._find_client(username, sender.id)
+            # 409 conflict on UNIQUE(username) is fine — refetch below.
+            # Anything else (401/403/RLS/missing key) gets logged.
+            print(f"[Realtor] insert client failed (will refetch): {e!r}")
+        found = await self._find_client(username, sender.id)
+        if not found:
+            print(
+                "[Realtor] refetch returned None — likely supabase_key wrong "
+                "or RLS blocks anon inserts. Use service_role key."
+            )
+        return found
 
     async def _find_new_matches(self, client: dict, max_n: int = 5):
         criteria = client.get("criteria") or {}

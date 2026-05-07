@@ -118,6 +118,12 @@ class RealtorMod(loader.Module):
                 "Master switch — без нього модуль нічого не робить",
                 validator=loader.validators.Boolean(),
             ),
+            loader.ConfigValue(
+                "auto_register",
+                True,
+                "Авто-додавати в БД клієнта, який написав уперше, і одразу відповідати йому",
+                validator=loader.validators.Boolean(),
+            ),
         )
         self._task = None
         self._stop = asyncio.Event()
@@ -219,7 +225,15 @@ class RealtorMod(loader.Module):
         username = "@" + sender.username if sender.username else None
         client = await self._find_client(username, sender.id)
         if not client:
-            return  # stranger — out of scope
+            if not self.config["auto_register"]:
+                return  # stranger — out of scope
+            try:
+                client = await self._auto_register_client(sender, username)
+            except Exception as e:
+                print(f"[Realtor] auto-register failed: {e}")
+                return
+            if not client:
+                return
         if client["status"] != "active" or not client["auto_enabled"]:
             return
 
@@ -232,14 +246,14 @@ class RealtorMod(loader.Module):
         )
         self._stats["msgs_received"] += 1
 
-        # Cache telegram_id for future runs (so we don't depend on @username).
+        # Cache telegram_id + bump last_inbound_at for future runs.
+        patch = {"last_inbound_at": _iso_now()}
         if not client.get("telegram_id"):
-            try:
-                await self._sb_patch(
-                    f"clients?id=eq.{client['id']}", {"telegram_id": sender.id}
-                )
-            except Exception as e:
-                print(f"[Realtor] patch telegram_id failed: {e}")
+            patch["telegram_id"] = sender.id
+        try:
+            await self._sb_patch(f"clients?id=eq.{client['id']}", patch)
+        except Exception as e:
+            print(f"[Realtor] patch client failed: {e}")
 
         # Generate reply
         try:
@@ -414,6 +428,35 @@ class RealtorMod(loader.Module):
             if rows:
                 return rows[0]
         return None
+
+    async def _auto_register_client(self, sender, username):
+        """Create a clients row for a previously-unknown sender and return it.
+
+        Auto-registered clients have empty criteria → not picked up by the
+        proactive scan loop (initiate=false), but auto_enabled stays true so
+        they get AI replies on inbound DMs.
+        """
+        first = (getattr(sender, "first_name", None) or "").strip()
+        last = (getattr(sender, "last_name", None) or "").strip()
+        full = (first + " " + last).strip()
+        name = full or (username.lstrip("@") if username else None) or f"tg:{sender.id}"
+        row = {
+            "name": name,
+            "username": username,  # may be None — UNIQUE allows multiple NULLs
+            "telegram_id": sender.id,
+            "description": "Авто-додано з вхідного DM",
+            "criteria": {},
+            "status": "active",
+            "auto_enabled": True,
+            "initiate": False,  # no criteria → don't proactively spam listings
+        }
+        try:
+            await self._sb_post("clients", row)
+        except Exception as e:
+            # Could be a race against another insert with the same username.
+            # Fall through to a refetch — if the row exists now, we'll use it.
+            print(f"[Realtor] insert client (will refetch): {e}")
+        return await self._find_client(username, sender.id)
 
     async def _find_new_matches(self, client: dict, max_n: int = 5):
         criteria = client.get("criteria") or {}

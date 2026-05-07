@@ -237,7 +237,7 @@ class RealtorMod(loader.Module):
         if client["status"] != "active" or not client["auto_enabled"]:
             return
 
-        text = (message.raw_text or "").strip()
+        text = _inbound_text(message)
         if not text:
             return
 
@@ -264,11 +264,15 @@ class RealtorMod(loader.Module):
         if not reply:
             return
 
-        # Human-like delay: clamped random in client.delay_min..delay_max minutes.
-        d_min = max(0, int(client.get("delay_min") or 1))
-        d_max = max(d_min, int(client.get("delay_max") or d_min))
-        delay = random.uniform(d_min * 60, d_max * 60)
-        delay = max(15.0, min(delay, 30 * 60))  # hard clamp 15s..30min
+        # Human-like delay. First reply to a client is short (greeting feels
+        # alive); follow-ups use the per-client delay_min..delay_max range.
+        if not client.get("last_outbound_at"):
+            delay = random.uniform(8.0, 35.0)
+        else:
+            d_min = max(0, int(client.get("delay_min") or 1))
+            d_max = max(d_min, int(client.get("delay_max") or d_min))
+            delay = random.uniform(d_min * 60, d_max * 60)
+            delay = max(15.0, min(delay, 30 * 60))  # hard clamp 15s..30min
         await asyncio.sleep(delay)
 
         # "typing…" action while we "compose" the reply
@@ -596,6 +600,10 @@ class RealtorMod(loader.Module):
             "— Не вигадуй ціни/адреси, яких не було в листуванні.\n"
             "— Питай зустрічне коротке питання, коли доречно "
             "(найкращий час показу, який поверх важливий і т.д.).\n"
+            "— Якщо вхідне має вигляд маркера ([стікер], [фото], "
+            "[голосове повідомлення], [відео], [файл]) — це не текст, "
+            "а медіа від клієнта. Відповідай дружнім вітанням і коротко "
+            "питай, чим можеш допомогти (бюджет, район, кімнати).\n"
         )
 
         messages = [
@@ -658,3 +666,36 @@ class RealtorMod(loader.Module):
 
 def _iso_now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def _inbound_text(message: Message) -> str:
+    """Best-effort textual representation of an inbound message.
+
+    Plain text → returned as is. Stickers/photos/voice/video/documents
+    get a short marker (with sticker emoji when available) so the AI
+    layer still gets to greet the user instead of silently dropping
+    the message.
+    """
+    text = (getattr(message, "raw_text", None) or "").strip()
+    if text:
+        return text
+    sticker = getattr(message, "sticker", None)
+    if sticker is not None:
+        emoji = ""
+        for attr in getattr(sticker, "attributes", None) or []:
+            alt = getattr(attr, "alt", None)
+            if alt:
+                emoji = alt
+                break
+        return f"[стікер {emoji}]".strip().rstrip()
+    if getattr(message, "photo", None) is not None:
+        return "[фото]"
+    if getattr(message, "voice", None) is not None:
+        return "[голосове повідомлення]"
+    if getattr(message, "video_note", None) is not None:
+        return "[відеокружок]"
+    if getattr(message, "video", None) is not None:
+        return "[відео]"
+    if getattr(message, "document", None) is not None:
+        return "[файл]"
+    return ""
